@@ -1,33 +1,119 @@
 #!/usr/bin/env bash
 set -e
 
+TARGET="${1:-all}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 echo "=========================================================="
-echo "AI Learning Platform - Environment Verification & Dev Start"
+echo "AI Learning Platform - Development Environment Bootstrapper"
+echo "Target mode: [${TARGET}] (options: all | api | web)"
 echo "=========================================================="
 
-# 1. Check Docker daemon & containers
-echo "[1/4] Checking Docker containers..."
-docker compose -f docker/docker-compose.yml up -d
+# Cleanup handler for graceful shutdown
+cleanup() {
+  echo ""
+  echo "Shutting down development servers..."
+  jobs -p | xargs -r kill 2>/dev/null || true
+  exit 0
+}
+trap cleanup SIGINT SIGTERM EXIT
 
-# 2. Check health of services
-echo "[2/4] Verifying services health..."
-docker compose -f docker/docker-compose.yml ps
+# -----------------------------------------------------------------------------
+# 1. Prerequisites Check
+# -----------------------------------------------------------------------------
+echo "[1/4] Checking prerequisites..."
 
-echo "Testing Postgres..."
-docker exec ai_lms_postgres pg_isready -U postgres -d ai_lms_db
+command -v docker >/dev/null 2>&1 || { echo "Docker is required but not installed."; exit 1; }
 
-echo "Testing Redis..."
-docker exec ai_lms_redis redis-cli ping
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "api" ]; then
+  command -v uv >/dev/null 2>&1 || { echo "'uv' package manager is required for backend. Install via: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
+fi
 
-echo "Testing Qdrant..."
-curl -s -f http://localhost:6333/healthz > /dev/null && echo "Qdrant is healthy!"
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "web" ]; then
+  command -v node >/dev/null 2>&1 || { echo "Node.js is required for frontend."; exit 1; }
+  command -v pnpm >/dev/null 2>&1 || { echo "'pnpm' is required for frontend. Install via: npm install -g pnpm"; exit 1; }
+fi
 
-# 3. Backend Environment
-echo "[3/4] Verifying Python backend virtualenv..."
-cd apps/api
-uv run python -c "from app.core.config import settings; print('Config loaded successfully for env:', settings.APP_ENV)"
+# Check environment variable templates
+if [ ! -f "$ROOT_DIR/.env" ]; then
+  if [ -f "$ROOT_DIR/.env.example" ]; then
+    echo "Root .env not found. Auto-generating from .env.example..."
+    cp "$ROOT_DIR/.env.example" "$ROOT_DIR/.env"
+  fi
+fi
 
-# 4. Start Dev Server
-echo "[4/4] Starting FastAPI development server on port 8000..."
-echo "API Docs will be available at: http://localhost:8000/docs"
-uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+if [ ! -f "$ROOT_DIR/apps/web/.env.local" ]; then
+  if [ -f "$ROOT_DIR/apps/web/.env.example" ]; then
+    echo "apps/web/.env.local not found. Auto-generating from .env.example..."
+    cp "$ROOT_DIR/apps/web/.env.example" "$ROOT_DIR/apps/web/.env.local"
+  fi
+fi
+
+# -----------------------------------------------------------------------------
+# 2. Infrastructure Services (Docker)
+# -----------------------------------------------------------------------------
+echo "[2/4] Starting infrastructure containers (PostgreSQL, Qdrant, Redis)..."
+docker compose -f "$ROOT_DIR/docker/docker-compose.yml" up -d
+
+echo "Verifying service readiness..."
+docker exec ai_lms_postgres pg_isready -U postgres -d ai_lms_db >/dev/null 2>&1 && echo "PostgreSQL: ready"
+docker exec ai_lms_redis redis-cli ping >/dev/null 2>&1 && echo "Redis: ready"
+curl -s -f http://localhost:6333/healthz >/dev/null && echo "Qdrant: ready"
+
+# -----------------------------------------------------------------------------
+# 3. Environment Preparation
+# -----------------------------------------------------------------------------
+echo "[3/4] Preparing application environments..."
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "api" ]; then
+  echo "Checking backend virtualenv & dependencies..."
+  (cd "$ROOT_DIR/apps/api" && uv run python -c "from app.core.config import settings; print('FastAPI Config:', settings.APP_ENV)")
+fi
+
+if [ "$TARGET" = "all" ] || [ "$TARGET" = "web" ]; then
+  echo "Checking frontend dependencies..."
+  if [ ! -d "$ROOT_DIR/apps/web/node_modules" ]; then
+    echo "node_modules missing in apps/web. Installing with pnpm..."
+    (cd "$ROOT_DIR/apps/web" && pnpm install)
+  else
+    echo "Frontend node_modules present"
+  fi
+fi
+
+# -----------------------------------------------------------------------------
+# 4. Service Launch
+# -----------------------------------------------------------------------------
+echo "[4/4] Starting development servers..."
+
+start_api() {
+  echo "Launching FastAPI on http://localhost:8000 (Docs: http://localhost:8000/docs)..."
+  (cd "$ROOT_DIR/apps/api" && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload)
+}
+
+start_web() {
+  echo "Launching Next.js on http://localhost:3000..."
+  (cd "$ROOT_DIR/apps/web" && pnpm dev)
+}
+
+if [ "$TARGET" = "api" ]; then
+  start_api
+elif [ "$TARGET" = "web" ]; then
+  start_web
+elif [ "$TARGET" = "all" ]; then
+  start_api &
+  API_PID=$!
+  start_web &
+  WEB_PID=$!
+
+  echo "----------------------------------------------------------"
+  echo "All services running! Press Ctrl+C to stop both servers."
+  echo "- Backend API: http://localhost:8000/docs"
+  echo "- Frontend Web: http://localhost:3000"
+  echo "----------------------------------------------------------"
+
+  # Wait for both background processes
+  wait $API_PID $WEB_PID
+else
+  echo "Unknown target: $TARGET. Supported targets: all | api | web"
+  exit 1
+fi
