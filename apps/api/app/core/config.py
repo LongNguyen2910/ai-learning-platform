@@ -1,9 +1,26 @@
 from functools import lru_cache
+from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _find_project_root() -> Path:
+    """Finds the workspace root directory (containing 'storage' and 'apps')."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        if (parent / "storage").is_dir() and (parent / "apps").is_dir():
+            return parent
+    return current.parents[4] if len(current.parents) > 4 else current.parent
+
+
+PROJECT_ROOT = _find_project_root()
+
+
 class Settings(BaseSettings):
+    # Base paths
+    PROJECT_ROOT: Path = PROJECT_ROOT
+
     # App
     APP_ENV: str = "development"
     DEBUG: bool = True
@@ -28,15 +45,27 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-1.5-flash"
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     EMBEDDING_MODEL: str = "models/text-embedding-004"
 
-    # Storage
-    UPLOAD_DIR: str = "storage/uploads"
+    # Storage (Anchored to the root storage directory outside apps/api)
+    UPLOAD_DIR: str = str(PROJECT_ROOT / "storage" / "uploads")
+    PARSED_DIR: str = str(PROJECT_ROOT / "storage" / "parsed")
     MAX_FILE_SIZE_MB: int = 50
+    INGESTION_CONCURRENCY: int = 3
+
+    @field_validator("UPLOAD_DIR", "PARSED_DIR", mode="after")
+    @classmethod
+    def resolve_storage_path(cls, v: str) -> str:
+        path = Path(v)
+        if not path.is_absolute():
+            return str((PROJECT_ROOT / path).resolve())
+        return str(path.resolve())
 
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file=(str(PROJECT_ROOT / ".env"), ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
 
 

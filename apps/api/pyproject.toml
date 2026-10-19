@@ -40,3 +40,10 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
+
+[tool.ruff.lint]
+ignore = [
+    "B008",      # Do not perform function call `File`/`Form` in argument defaults (FastAPI standard)
+    "ASYNC230",  # Async functions opening local files synchronously in background task
+    "BLE001",    # Catching generic Exception in outer service/retry handler
+]
