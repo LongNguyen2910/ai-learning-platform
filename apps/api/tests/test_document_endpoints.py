@@ -103,6 +103,31 @@ def test_retry_document_already_parsing(client, temp_dirs):
     assert "currently being processed" in response.json()["detail"]
 
 
+def test_retry_document_already_indexing(client, temp_dirs):
+    temp_upload, temp_parsed = temp_dirs
+    doc_id = "indexing-doc-456"
+
+    pdf_file = temp_upload / f"{doc_id}.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 dummy")
+
+    doc_dir = temp_parsed / doc_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    metadata = DocumentMetadata(
+        document_id=doc_id,
+        title="Indexing Doc",
+        file_path=str(pdf_file),
+        file_size_kb=5,
+        total_pages=1,
+        status="indexing",
+    )
+    with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata.model_dump(), f)
+
+    response = client.post(f"/api/v1/documents/{doc_id}/retry")
+    assert response.status_code == 409
+    assert "currently being processed (indexing)" in response.json()["detail"]
+
+
 def test_retry_document_missing_pdf_file(client, temp_dirs):
     temp_upload, temp_parsed = temp_dirs
     doc_id = "missing-pdf-doc-789"

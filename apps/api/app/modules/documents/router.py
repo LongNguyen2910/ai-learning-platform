@@ -164,6 +164,10 @@ async def delete_document(document_id: str):
 async def retry_document(
     document_id: str,
     background_tasks: BackgroundTasks,
+    force: bool = Query(
+        False,
+        description="If True, re-parses all pages from scratch instead of reusing cached markdowns.",
+    ),
 ):
     metadata = ingestion_service.load_metadata(document_id)
     if not metadata:
@@ -172,10 +176,10 @@ async def retry_document(
             detail=f"Document '{document_id}' not found.",
         )
 
-    if metadata.status == "parsing":
+    if metadata.status in ("parsing", "indexing"):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Document '{document_id}' is currently being processed.",
+            detail=f"Document '{document_id}' is currently being processed ({metadata.status}).",
         )
 
     pdf_path = Path(metadata.file_path)
@@ -199,6 +203,7 @@ async def retry_document(
         document_id=document_id,
         pdf_path=pdf_path,
         title=metadata.title,
+        force=force,
     )
 
     return DocumentRetryResponse(

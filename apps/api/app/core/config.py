@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     # Gemini
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
-    EMBEDDING_MODEL: str = "models/text-embedding-004"
+    EMBEDDING_MODEL: str = "gemini-embedding-001"
 
     # Storage (Anchored to the root storage directory outside apps/api)
     UPLOAD_DIR: str = str(PROJECT_ROOT / "storage" / "uploads")

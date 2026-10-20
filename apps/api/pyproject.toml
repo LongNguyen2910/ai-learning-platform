@@ -16,6 +16,7 @@ dependencies = [
     "qdrant-client>=1.8.0",
     "llama-index>=0.10.20",
     "llama-index-vector-stores-qdrant>=0.1.4",
+    "llama-index-embeddings-google-genai>=0.6.0",
     "google-generativeai>=0.4.1",
     "python-multipart>=0.0.9",
     "pypdf>=4.1.0",

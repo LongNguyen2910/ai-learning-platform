@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import re
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +13,10 @@ from app.modules.documents.schemas import (
     DocumentMetadata,
     DocumentStatusResponse,
     ParsedPageMetadata,
+)
+from app.modules.documents.vector_service import (
+    DocumentVectorService,
+    document_vector_service,
 )
 from app.modules.documents.vision_parser import GeminiVisionParser
 
@@ -25,10 +30,12 @@ class IngestionService:
         self,
         renderer: PDFPageRenderer | None = None,
         vision_parser: GeminiVisionParser | None = None,
+        vector_service: DocumentVectorService | None = None,
         parsed_base_dir: str | None = None,
     ):
         self.renderer = renderer or PDFPageRenderer()
         self.vision_parser = vision_parser or GeminiVisionParser()
+        self.vector_service = vector_service or document_vector_service
         self._parsed_base_dir = parsed_base_dir
 
     @property
@@ -70,13 +77,36 @@ class IngestionService:
         pdf_path: Path,
         page_num: int,
         doc_pages_dir: Path,
+        force: bool = False,
     ) -> tuple[int, str, ParsedPageMetadata]:
         """Renders and parses a single page, saving its markdown file."""
+        page_file = doc_pages_dir / f"page_{page_num}.md"
+
+        # Smart caching: check if page markdown is already parsed and non-empty
+        if not force and page_file.is_file():
+            content = page_file.read_text(encoding="utf-8")
+            if content.strip():
+                logger.info(
+                    "Page %d already parsed, reusing cached markdown",
+                    page_num,
+                )
+                has_formula = "$$" in content or bool(
+                    re.search(r"(?<!\\)\$[^$]+\$", content)
+                )
+                has_image = "[Hình vẽ trang" in content or "![" in content
+                meta = ParsedPageMetadata(
+                    page_number=page_num,
+                    has_formula=has_formula,
+                    has_image=has_image,
+                    char_count=len(content),
+                    file_path=str(page_file),
+                )
+                return page_num, content, meta
+
         # Fast-path: Check if page is empty
         if self.renderer.is_page_empty(pdf_path, page_num):
             logger.info("Page %d is empty, skipping Gemini call", page_num)
             content = f"<!-- Trang {page_num} để trống -->"
-            page_file = doc_pages_dir / f"page_{page_num}.md"
             with open(page_file, "w", encoding="utf-8") as f:
                 f.write(content)
             meta = ParsedPageMetadata(
@@ -95,7 +125,6 @@ class IngestionService:
         content, meta = await self.vision_parser.parse_page_image(png_bytes, page_num)
 
         # Save individual page markdown
-        page_file = doc_pages_dir / f"page_{page_num}.md"
         with open(page_file, "w", encoding="utf-8") as f:
             f.write(content)
 
@@ -107,6 +136,7 @@ class IngestionService:
         document_id: str,
         pdf_path: str | Path,
         title: str,
+        force: bool = False,
     ) -> DocumentMetadata:
         """Main Ingestion Worker execution method."""
         file_path = Path(pdf_path)
@@ -135,7 +165,9 @@ class IngestionService:
         try:
             # Dispatch concurrent parsing tasks
             tasks = [
-                self._process_single_page(file_path, page_num, pages_dir)
+                self._process_single_page(
+                    file_path, page_num, pages_dir, force=force
+                )
                 for page_num in range(1, total_pages + 1)
             ]
             results = await asyncio.gather(*tasks)
@@ -158,13 +190,22 @@ class IngestionService:
             with open(full_doc_path, "w", encoding="utf-8") as f:
                 f.write(full_markdown)
 
-            # Mark document as parsed
-            metadata.status = "parsed"
+            # Mark document as indexing
+            metadata.status = "indexing"
             metadata.pages = parsed_pages_meta
             metadata.error_message = None
             self.save_metadata(metadata)
+            logger.info("Starting vector indexing for document ID: %s", document_id)
+
+            # Execute Qdrant vector indexing
+            self.vector_service.index_document_pages(document_id, parsed_pages_meta)
+
+            # Mark document as ready
+            metadata.status = "ready"
+            self.save_metadata(metadata)
             logger.info(
-                "Ingestion completed successfully for document ID: %s", document_id
+                "Ingestion & indexing completed successfully for document ID: %s",
+                document_id,
             )
             return metadata
 
@@ -254,7 +295,13 @@ class IngestionService:
         if doc_dir.exists():
             shutil.rmtree(doc_dir, ignore_errors=True)
 
-        logger.info("Deleted document %s and its associated files", document_id)
+        # Delete vectors from Qdrant
+        try:
+            self.vector_service.delete_document_vectors(document_id)
+        except Exception as e:
+            logger.warning("Failed to delete vectors for document %s: %s", document_id, e)
+
+        logger.info("Deleted document %s and its associated files and vectors", document_id)
         return True
 
 
