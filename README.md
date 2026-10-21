@@ -84,36 +84,6 @@ cd ai-learning-platform
 cp .env.example .env
 ```
 
-Open `.env` to verify settings:
-```ini
-# Application Core
-APP_ENV=development
-DEBUG=True
-SECRET_KEY=dev-super-secret-key-change-in-production-min-32-chars
-
-# PostgreSQL 15 (AsyncPG)
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=ai_lms_db
-POSTGRES_PORT=5432
-DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/ai_lms_db
-
-# Qdrant Vector Engine
-QDRANT_URL=http://localhost:6333
-QDRANT_HTTP_PORT=6333
-QDRANT_GRPC_PORT=6334
-QDRANT_COLLECTION_NAME=learning_chunks
-
-# Redis 7 Cache & Rate Limiter
-REDIS_PORT=6379
-REDIS_URL=redis://localhost:6379/0
-
-# Google Gemini API
-GEMINI_API_KEY=your_gemini_api_key_here
-GEMINI_MODEL=gemini-1.5-flash
-EMBEDDING_MODEL=models/text-embedding-004
-```
-
 > [!IMPORTANT]
 > Obtain a development API key from [Google AI Studio](https://aistudio.google.com/) and update `GEMINI_API_KEY`. Never commit `.env` to version control.
 
