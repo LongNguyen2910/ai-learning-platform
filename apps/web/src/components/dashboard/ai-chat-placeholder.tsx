@@ -62,9 +62,6 @@ export function AiChatPlaceholder({
           <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
             Socratic AI Tutor
           </span>
-          <span className="rounded-md bg-slate-200/70 dark:bg-slate-800 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-600 dark:text-slate-400">
-            Split-View 50/50
-          </span>
         </div>
 
         <button
