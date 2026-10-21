@@ -34,7 +34,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+apps/api/.venv/lib/
 lib64/
 parts/
 sdist/
