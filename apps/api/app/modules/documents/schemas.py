@@ -41,6 +41,7 @@ class DocumentStatusResponse(BaseModel):
     document_id: str
     title: str
     status: DocumentStatus
+    file_size_kb: int = 0
     total_pages: int
     parsed_pages: int
     error_message: str | None = None

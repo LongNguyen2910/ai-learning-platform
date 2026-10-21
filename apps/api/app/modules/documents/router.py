@@ -13,12 +13,14 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 
 from app.core.config import settings
 from app.modules.documents.renderer import PDFPageRenderer
 from app.modules.documents.schemas import (
     DocumentContentResponse,
     DocumentDeleteResponse,
+    DocumentMetadata,
     DocumentRetryResponse,
     DocumentStatusResponse,
     DocumentUploadResponse,
@@ -28,6 +30,15 @@ from app.modules.documents.service import ingestion_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+@router.get(
+    "",
+    response_model=list[DocumentStatusResponse],
+    summary="List all uploaded documents",
+)
+async def list_documents():
+    return ingestion_service.list_documents()
 
 
 @router.post(
@@ -67,7 +78,8 @@ async def upload_document(
         await file.close()
 
     # Validate file size
-    file_size_mb = destination.stat().st_size / (1024 * 1024)
+    file_size_bytes = destination.stat().st_size
+    file_size_mb = file_size_bytes / (1024 * 1024)
     if file_size_mb > settings.MAX_FILE_SIZE_MB:
         destination.unlink(missing_ok=True)
         raise HTTPException(
@@ -85,6 +97,17 @@ async def upload_document(
             detail=f"Invalid or corrupted PDF file: {exc}",
         )
 
+    # Save initial metadata immediately so list/status queries see it right away
+    initial_metadata = DocumentMetadata(
+        document_id=document_id,
+        title=doc_title,
+        file_path=str(destination),
+        file_size_kb=max(1, int(file_size_bytes / 1024)),
+        total_pages=total_pages,
+        status="uploading",
+    )
+    ingestion_service.save_metadata(initial_metadata)
+
     # Dispatch ingestion worker task to background
     background_tasks.add_task(
         ingestion_service.run_ingestion_pipeline,
@@ -99,6 +122,27 @@ async def upload_document(
         status="uploading",
         total_pages=total_pages,
         message=f"Document uploaded successfully. Parsing {total_pages} pages in background.",
+    )
+
+
+@router.get(
+    "/{document_id}/file",
+    summary="Stream raw PDF file for inline viewing",
+)
+async def get_document_file(document_id: str):
+    pdf_path = ingestion_service.get_document_pdf_path(document_id)
+    if not pdf_path:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"PDF file for document '{document_id}' not found.",
+        )
+    metadata = ingestion_service.load_metadata(document_id)
+    filename = f"{metadata.title if metadata else document_id}.pdf"
+    return FileResponse(
+        path=pdf_path,
+        media_type="application/pdf",
+        filename=filename,
+        content_disposition_type="inline",
     )
 
 
