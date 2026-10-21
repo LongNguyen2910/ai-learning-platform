@@ -77,6 +77,9 @@ next-env.d.ts
 # Local Storage & Uploads
 storage/uploads/*
 !storage/uploads/.gitkeep
+storage/parsed/*
+!storage/parsed/.gitkeep
+apps/api/storage/
 
 # Docker volumes (if mapped locally)
 postgres_data/
