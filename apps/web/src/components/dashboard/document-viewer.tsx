@@ -33,8 +33,9 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
   const [isLoadingContent, setIsLoadingContent] = React.useState(false)
   const [contentError, setContentError] = React.useState<string | null>(null)
 
-  const pdfSourceUrl =
+  const rawPdfUrl =
     document.localBlobUrl || getDocumentFileUrl(document.document_id)
+  const pdfViewerUrl = `${rawPdfUrl}#view=FitH`
 
   // Load parsed markdown when user switches to the Markdown tab
   React.useEffect(() => {
@@ -128,7 +129,7 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
           </div>
 
           <a
-            href={pdfSourceUrl}
+            href={rawPdfUrl}
             target="_blank"
             rel="noopener noreferrer"
             aria-label="Open PDF in new tab"
@@ -160,14 +161,15 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
         {/* Left Pane: Document Content (100% when chat closed, 50% when chat open) */}
         <div
-          className={`h-full min-h-0 flex flex-col transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] ${
+          className={`h-full min-h-0 flex flex-col ${
             isSplitChatOpen ? "w-full lg:w-1/2" : "w-full"
           }`}
         >
           {activeTab === "pdf" ? (
             <div className="flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900">
               <iframe
-                src={pdfSourceUrl}
+                key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
+                src={pdfViewerUrl}
                 title={`PDF Viewer - ${document.title}`}
                 className="w-full h-full border-0"
               />
