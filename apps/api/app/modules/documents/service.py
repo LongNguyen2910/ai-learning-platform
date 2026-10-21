@@ -140,7 +140,7 @@ class IngestionService:
     ) -> DocumentMetadata:
         """Main Ingestion Worker execution method."""
         file_path = Path(pdf_path)
-        doc_dir = self.get_document_dir(document_id)
+        doc_dir = self.get_document_dir(document_id, create=True)
         pages_dir = doc_dir / "pages"
 
         file_size_kb = int(file_path.stat().st_size / 1024) if file_path.exists() else 0
@@ -216,6 +216,29 @@ class IngestionService:
             self.save_metadata(metadata)
             raise
 
+    def list_documents(self) -> list[DocumentStatusResponse]:
+        if not self.parsed_base_dir.exists():
+            return []
+        items: list[DocumentStatusResponse] = []
+        for entry in self.parsed_base_dir.iterdir():
+            if entry.is_dir():
+                status_res = self.get_document_status(entry.name)
+                if status_res is not None:
+                    items.append(status_res)
+        items.sort(key=lambda x: x.created_at, reverse=True)
+        return items
+
+    def get_document_pdf_path(self, document_id: str) -> Path | None:
+        metadata = self.load_metadata(document_id)
+        if metadata and metadata.file_path:
+            candidate = Path(metadata.file_path)
+            if candidate.is_file():
+                return candidate
+        fallback = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
+        if fallback.is_file():
+            return fallback
+        return None
+
     def get_document_status(self, document_id: str) -> DocumentStatusResponse | None:
         metadata = self.load_metadata(document_id)
         if not metadata:
@@ -224,6 +247,7 @@ class IngestionService:
             document_id=metadata.document_id,
             title=metadata.title,
             status=metadata.status,
+            file_size_kb=metadata.file_size_kb,
             total_pages=metadata.total_pages,
             parsed_pages=len(metadata.pages),
             error_message=metadata.error_message,
