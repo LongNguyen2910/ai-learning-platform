@@ -5,22 +5,40 @@
 # OS & Editor Files
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 *.swp
 *.swo
 *~
-.vscode/
-!.vscode/extensions.json
-!.vscode/settings.json
 .idea/
+.vscode/*
 
 # Environment Variables & Sensitive Credentials
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!.env.*.example
 *.pem
 *.key
 *.cert
-!.env.example
+*.crt
+*.pfx
+*.p12
+
+# General Logs & Dumps
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dump.rdb
+
+# SQLite / Local Databases
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
 
 # Python & Backend (apps/api)
 __pycache__/
@@ -34,8 +52,6 @@ dist/
 downloads/
 eggs/
 .eggs/
-apps/api/.venv/lib/
-lib64/
 parts/
 sdist/
 var/
@@ -49,11 +65,11 @@ wheels/
 venv/
 ENV/
 env/
-apps/api/.venv/
 
 # Testing, Linting & Coverage
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
 coverage/
 .ruff_cache/
@@ -61,24 +77,18 @@ coverage/
 
 # Node.js & Frontend (apps/web)
 node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 .pnpm-store/
 .next/
 out/
-build/
 .turbo/
 .vercel/
 *.tsbuildinfo
 next-env.d.ts
 
 # Local Storage & Uploads
-storage/uploads/*
-!storage/uploads/.gitkeep
-storage/parsed/*
-!storage/parsed/.gitkeep
+storage/**
+!storage/**/
+!storage/**/.gitkeep
 apps/api/storage/
 
 # Docker volumes (if mapped locally)
