@@ -69,14 +69,14 @@ export function AppSidebar({
       aria-label="Primary Sidebar Navigation"
       className={cn(
         "relative flex flex-col border-r border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-950 select-none shrink-0 transition-[width] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]",
-        collapsed ? "w-[68px]" : "w-[248px]"
+        collapsed ? "w-[72px]" : "w-[260px]"
       )}
     >
       {/* Top Brand Header: App Logo + AI LEARNING PLATFORM */}
       <div
         className={cn(
-          "h-16 flex items-center border-b border-slate-200/70 dark:border-slate-800/70 px-3.5",
-          collapsed ? "justify-center" : "justify-between"
+          "h-16 flex items-center border-b border-slate-200/70 dark:border-slate-800/70 px-4",
+          collapsed ? "justify-center" : "justify-start"
         )}
       >
         <Link
@@ -92,33 +92,21 @@ export function AppSidebar({
 
           {!collapsed && (
             <div className="min-w-0">
-              <span className="block text-[13px] font-bold tracking-tight text-slate-900 dark:text-white truncate">
+              <span className="block text-[15px] font-bold tracking-tight text-slate-900 dark:text-white truncate leading-tight">
                 AI LEARNING
               </span>
-              <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500 truncate">
-                Workspace
+              <span className="block text-[11px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500 truncate mt-0.5">
+                PLATFORM
               </span>
             </div>
           )}
         </Link>
-
-        {!collapsed && (
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            aria-label="Collapse navigation menu"
-            title="Collapse sidebar"
-            className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-100 dark:hover:bg-slate-900 dark:hover:text-slate-200 transition-colors cursor-pointer shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
-          >
-            <PanelLeftClose className="h-4 w-4 stroke-[1.75]" />
-          </button>
-        )}
       </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto">
+      <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto">
         {!collapsed && (
-          <div className="px-2.5 pb-2 text-[11px] font-medium text-slate-400 dark:text-slate-500">
+          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
             Study Menu
           </div>
         )}
@@ -136,18 +124,18 @@ export function AppSidebar({
                 title={`${item.label} (Coming soon)`}
                 aria-disabled="true"
                 className={cn(
-                  "flex items-center rounded-xl text-[13.5px] font-medium text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-75",
+                  "flex items-center rounded-xl text-[15px] font-medium text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-75",
                   collapsed
-                    ? "h-10 w-10 mx-auto justify-center"
-                    : "h-10 px-3 justify-between"
+                    ? "h-11 w-11 mx-auto justify-center"
+                    : "h-11 px-3.5 justify-between"
                 )}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Icon className="h-[18px] w-[18px] shrink-0 stroke-[1.75]" />
+                <div className="flex items-center gap-3.5 min-w-0">
+                  <Icon className="h-5 w-5 shrink-0 stroke-[1.75]" />
                   {!collapsed && <span className="truncate">{item.label}</span>}
                 </div>
                 {!collapsed && item.badge && (
-                  <span className="rounded-md bg-slate-100 dark:bg-slate-900 px-1.5 py-0.5 text-[10px] font-mono font-medium text-slate-400 dark:text-slate-500 border border-slate-200/60 dark:border-slate-800">
+                  <span className="rounded-md bg-slate-100 dark:bg-slate-900 px-2 py-0.5 text-[11px] font-mono font-medium text-slate-400 dark:text-slate-500 border border-slate-200/60 dark:border-slate-800">
                     {item.badge}
                   </span>
                 )}
@@ -162,19 +150,19 @@ export function AppSidebar({
               onClick={() => onSelectDocumentsRoot?.()}
               title={collapsed ? item.label : undefined}
               className={cn(
-                "flex items-center rounded-xl text-[13.5px] font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
+                "flex items-center rounded-xl text-[15px] font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
                 collapsed
-                  ? "h-10 w-10 mx-auto justify-center"
-                  : "h-10 px-3 justify-between",
+                  ? "h-11 w-11 mx-auto justify-center"
+                  : "h-11 px-3.5 justify-between",
                 isActive
                   ? "bg-[#0A77FF]/10 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 font-semibold"
                   : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
               )}
             >
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-3.5 min-w-0">
                 <Icon
                   className={cn(
-                    "h-[18px] w-[18px] shrink-0 stroke-[1.8]",
+                    "h-5 w-5 shrink-0 stroke-[1.8]",
                     isActive
                       ? "text-[#0A77FF] dark:text-sky-400"
                       : "text-slate-500 dark:text-slate-400"
@@ -183,15 +171,15 @@ export function AppSidebar({
                 {!collapsed && <span className="truncate">{item.label}</span>}
               </div>
               {!collapsed && isActive && (
-                <span className="h-1.5 w-1.5 rounded-full bg-[#0A77FF] dark:bg-sky-400" />
+                <span className="h-2 w-2 rounded-full bg-[#0A77FF] dark:bg-sky-400" />
               )}
             </Link>
           )
         })}
       </nav>
 
-      {/* Bottom Collapse / Expand Control (especially visible when collapsed) */}
-      <div className="p-2.5 border-t border-slate-200/70 dark:border-slate-800/70">
+      {/* Single Collapse / Expand Control */}
+      <div className="p-3 border-t border-slate-200/70 dark:border-slate-800/70">
         <button
           type="button"
           onClick={onToggleCollapse}
@@ -200,15 +188,15 @@ export function AppSidebar({
           }
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           className={cn(
-            "w-full h-9 rounded-xl flex items-center text-xs font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-900 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
-            collapsed ? "justify-center" : "px-3 gap-2.5"
+            "w-full h-10 rounded-xl flex items-center text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-100 dark:hover:bg-slate-900 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
+            collapsed ? "justify-center" : "px-3.5 gap-3"
           )}
         >
           {collapsed ? (
-            <PanelLeftOpen className="h-4 w-4 stroke-[1.75]" />
+            <PanelLeftOpen className="h-5 w-5 stroke-[1.75]" />
           ) : (
             <>
-              <PanelLeftClose className="h-4 w-4 stroke-[1.75]" />
+              <PanelLeftClose className="h-5 w-5 stroke-[1.75]" />
               <span>Collapse sidebar</span>
             </>
           )}

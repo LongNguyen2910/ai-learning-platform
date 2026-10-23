@@ -32,14 +32,33 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
     React.useState<DocumentContentResponse | null>(null)
   const [isLoadingContent, setIsLoadingContent] = React.useState(false)
   const [contentError, setContentError] = React.useState<string | null>(null)
+  const loadedDocIdRef = React.useRef<string | null>(null)
 
   const rawPdfUrl =
     document.localBlobUrl || getDocumentFileUrl(document.document_id)
   const pdfViewerUrl = `${rawPdfUrl}#view=FitH`
 
-  // Load parsed markdown when user switches to the Markdown tab
+  // Reset reader state only when switching to a different document ID
+  React.useEffect(() => {
+    setActiveTab("pdf")
+    setContentData(null)
+    setContentError(null)
+    loadedDocIdRef.current = null
+  }, [document.document_id])
+
+  // Load parsed markdown when user switches to the Markdown tab (cached once ready/parsed)
   React.useEffect(() => {
     if (activeTab !== "markdown") return
+
+    // Skip network fetch if we already cached the completed markdown for this document
+    const isAlreadyFinal =
+      contentData &&
+      loadedDocIdRef.current === document.document_id &&
+      (contentData.status === "ready" || contentData.status === "parsed") &&
+      Boolean(contentData.full_content)
+
+    if (isAlreadyFinal) return
+
     let cancelled = false
 
     const loadMarkdown = async () => {
@@ -49,6 +68,7 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
         const res = await fetchDocumentContent(document.document_id)
         if (!cancelled) {
           setContentData(res)
+          loadedDocIdRef.current = document.document_id
         }
       } catch (err) {
         if (!cancelled) {
@@ -69,7 +89,7 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
     return () => {
       cancelled = true
     }
-  }, [activeTab, document.document_id])
+  }, [activeTab, document.document_id, document.status, contentData])
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-slate-50/70 dark:bg-slate-950">
@@ -165,48 +185,61 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
             isSplitChatOpen ? "w-full lg:w-1/2" : "w-full"
           }`}
         >
-          {activeTab === "pdf" ? (
-            <div className="flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900">
-              <iframe
-                key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
-                src={pdfViewerUrl}
-                title={`PDF Viewer - ${document.title}`}
-                className="w-full h-full border-0"
-              />
+          {/* Keep PDF iframe mounted in DOM even when viewing Parsed Text tab to avoid reload lag */}
+          <div
+            className={
+              activeTab === "pdf"
+                ? "flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900"
+                : "hidden"
+            }
+          >
+            <iframe
+              key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
+              src={pdfViewerUrl}
+              title={`PDF Viewer - ${document.title}`}
+              className="w-full h-full border-0"
+            />
+          </div>
+
+          <div
+            className={
+              activeTab === "markdown"
+                ? "flex-1 overflow-y-auto p-6 sm:p-8 bg-white dark:bg-slate-950"
+                : "hidden"
+            }
+          >
+            <div className="max-w-3xl mx-auto">
+              {isLoadingContent ? (
+                <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
+                  <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
+                  <span className="text-xs font-medium">
+                    Loading extracted Markdown content...
+                  </span>
+                </div>
+              ) : contentError ? (
+                <div className="rounded-xl border border-rose-200/80 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 p-4 text-xs text-rose-600 dark:text-rose-400">
+                  {contentError}
+                </div>
+              ) : contentData?.full_content ? (
+                <article className="prose prose-slate dark:prose-invert max-w-none">
+                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-800 dark:text-slate-200 bg-transparent p-0 border-0">
+                    {contentData.full_content}
+                  </pre>
+                </article>
+              ) : (
+                <div className="py-16 text-center space-y-2">
+                  <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                    Markdown extraction is still in progress
+                  </p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Current status:{" "}
+                    <span className="font-mono">{document.status}</span>. You
+                    can read the original PDF right away using the PDF tab.
+                  </p>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto p-6 sm:p-8 bg-white dark:bg-slate-950">
-              <div className="max-w-3xl mx-auto">
-                {isLoadingContent ? (
-                  <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
-                    <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
-                    <span className="text-xs font-medium">
-                      Loading extracted Markdown content...
-                    </span>
-                  </div>
-                ) : contentError ? (
-                  <div className="rounded-xl border border-rose-200/80 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 p-4 text-xs text-rose-600 dark:text-rose-400">
-                    {contentError}
-                  </div>
-                ) : contentData?.full_content ? (
-                  <article className="prose prose-slate dark:prose-invert max-w-none">
-                    <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-800 dark:text-slate-200 bg-transparent p-0 border-0">
-                      {contentData.full_content}
-                    </pre>
-                  </article>
-                ) : (
-                  <div className="py-16 text-center space-y-2">
-                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      Markdown extraction is still in progress
-                    </p>
-                    <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                      Current status: <span className="font-mono">{document.status}</span>. You can read the original PDF right away using the PDF tab.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Right Pane: 50% AI Tutor Split-View Placeholder */}

@@ -143,6 +143,7 @@ async def get_document_file(document_id: str):
         media_type="application/pdf",
         filename=filename,
         content_disposition_type="inline",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
