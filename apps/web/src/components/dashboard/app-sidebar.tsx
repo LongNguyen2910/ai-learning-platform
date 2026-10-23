@@ -93,7 +93,7 @@ export function AppSidebar({
           {!collapsed && (
             <div className="min-w-0">
               <span className="block text-[13px] font-bold tracking-tight text-slate-900 dark:text-white truncate">
-                AI LEARNING PLATFORM
+                AI LEARNING
               </span>
               <span className="block text-[10px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500 truncate">
                 Workspace
