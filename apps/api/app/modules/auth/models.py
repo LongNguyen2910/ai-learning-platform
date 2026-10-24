@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Integer, String, func, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -34,7 +34,7 @@ class User(Base):
         index=True,
     )
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
-    full_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    full_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     role: Mapped[str] = mapped_column(String(20), default="user", nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     daily_token_limit: Mapped[int] = mapped_column(
@@ -56,33 +56,33 @@ class User(Base):
     )
 
     # Relationships
-    subjects: Mapped[List["Subject"]] = relationship(
+    subjects: Mapped[list["Subject"]] = relationship(
         "Subject", back_populates="user", cascade="all, delete-orphan"
     )
-    documents: Mapped[List["Document"]] = relationship(
+    documents: Mapped[list["Document"]] = relationship(
         "Document", back_populates="user", cascade="all, delete-orphan"
     )
-    roadmaps: Mapped[List["Roadmap"]] = relationship(
+    roadmaps: Mapped[list["Roadmap"]] = relationship(
         "Roadmap", back_populates="user", cascade="all, delete-orphan"
     )
-    study_sessions: Mapped[List["StudySession"]] = relationship(
+    study_sessions: Mapped[list["StudySession"]] = relationship(
         "StudySession", back_populates="user", cascade="all, delete-orphan"
     )
-    chat_sessions: Mapped[List["ChatSession"]] = relationship(
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
         "ChatSession", back_populates="user", cascade="all, delete-orphan"
     )
-    flashcard_decks: Mapped[List["FlashcardDeck"]] = relationship(
+    flashcard_decks: Mapped[list["FlashcardDeck"]] = relationship(
         "FlashcardDeck", back_populates="user", cascade="all, delete-orphan"
     )
-    flashcards: Mapped[List["Flashcard"]] = relationship(
+    flashcards: Mapped[list["Flashcard"]] = relationship(
         "Flashcard", back_populates="user", cascade="all, delete-orphan"
     )
-    quizzes: Mapped[List["Quiz"]] = relationship(
+    quizzes: Mapped[list["Quiz"]] = relationship(
         "Quiz", back_populates="user", cascade="all, delete-orphan"
     )
-    quiz_attempts: Mapped[List["QuizAttempt"]] = relationship(
+    quiz_attempts: Mapped[list["QuizAttempt"]] = relationship(
         "QuizAttempt", back_populates="user", cascade="all, delete-orphan"
     )
-    token_usage_logs: Mapped[List["TokenUsageLog"]] = relationship(
+    token_usage_logs: Mapped[list["TokenUsageLog"]] = relationship(
         "TokenUsageLog", back_populates="user"
     )
