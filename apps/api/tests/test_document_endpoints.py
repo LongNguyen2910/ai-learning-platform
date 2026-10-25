@@ -1,6 +1,7 @@
 import json
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -9,12 +10,26 @@ from fastapi.testclient import TestClient
 
 from app.core.config import settings
 from app.main import app
+from app.modules.auth.dependencies import get_current_active_user
+from app.modules.auth.models import User
 from app.modules.documents.schemas import DocumentMetadata
+
+MOCK_USER_ID = uuid.UUID("11111111-1111-1111-1111-111111111111")
+MOCK_USER = User(
+    id=MOCK_USER_ID,
+    email="testuser@example.com",
+    hashed_password="hashed_dummy_password",
+    role="student",
+    is_active=True,
+)
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    app.dependency_overrides[get_current_active_user] = lambda: MOCK_USER
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.pop(get_current_active_user, None)
 
 
 @pytest.fixture

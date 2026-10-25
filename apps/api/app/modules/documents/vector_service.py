@@ -108,7 +108,11 @@ class DocumentVectorService:
                 ),
             )
 
-        # Ensure payload indexes on doc_id and page_number for fast filtering
+        # Ensure payload indexes on user_id, doc_id and page_number for fast filtering
+        self._create_payload_index_safe(
+            field_name="user_id",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
         self._create_payload_index_safe(
             field_name="doc_id",
             field_schema=models.PayloadSchemaType.KEYWORD,
@@ -170,6 +174,7 @@ class DocumentVectorService:
         self,
         document_id: str,
         pages_meta: list[ParsedPageMetadata],
+        user_id: str | None = None,
     ) -> int:
         """Chunks each page markdown file and indexes into Qdrant with metadata.
 
@@ -195,21 +200,27 @@ class DocumentVectorService:
                 continue
 
             # Assign unique doc_id per page to avoid document-level id collisions
+            node_metadata: dict[str, Any] = {
+                "doc_id": document_id,
+                "page_number": page_meta.page_number,
+                "has_formula": page_meta.has_formula,
+                "has_image": page_meta.has_image,
+            }
+            if user_id:
+                node_metadata["user_id"] = str(user_id)
+
             page_doc = Document(
                 text=content,
                 doc_id=f"{document_id}_page_{page_meta.page_number}",
-                metadata={
-                    "doc_id": document_id,
-                    "page_number": page_meta.page_number,
-                    "has_formula": page_meta.has_formula,
-                    "has_image": page_meta.has_image,
-                },
+                metadata=node_metadata,
             )
 
             page_nodes = self.splitter.get_nodes_from_documents([page_doc])
             for node in page_nodes:
                 node.metadata["doc_id"] = document_id
                 node.metadata["chunk_index"] = global_chunk_idx
+                if user_id:
+                    node.metadata["user_id"] = str(user_id)
                 # Maintain source relationship pointing to document_id
                 node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(
                     node_id=document_id
@@ -244,13 +255,18 @@ class DocumentVectorService:
 
     def get_retriever(
         self,
-        document_id: str,
+        document_id: str | None = None,
+        user_id: str | None = None,
         page_number: int | None = None,
         similarity_top_k: int = 5,
         **kwargs: Any,
     ) -> VectorIndexRetriever:
-        """Constructs a LlamaIndex VectorIndexRetriever filtered by doc_id and optional page_number."""
-        filters_list = [MetadataFilter(key="doc_id", value=document_id)]
+        """Constructs a LlamaIndex VectorIndexRetriever filtered by user_id, doc_id and optional page_number."""
+        filters_list: list[MetadataFilter] = []
+        if user_id is not None:
+            filters_list.append(MetadataFilter(key="user_id", value=str(user_id)))
+        if document_id is not None:
+            filters_list.append(MetadataFilter(key="doc_id", value=str(document_id)))
         if page_number is not None:
             filters_list.append(MetadataFilter(key="page_number", value=page_number))
 
@@ -260,9 +276,10 @@ class DocumentVectorService:
             embed_model=self.get_embed_model(),
         )
 
+        filters = MetadataFilters(filters=filters_list) if filters_list else None
         return index.as_retriever(
             similarity_top_k=similarity_top_k,
-            filters=MetadataFilters(filters=filters_list),
+            filters=filters,
             **kwargs,
         )
 
