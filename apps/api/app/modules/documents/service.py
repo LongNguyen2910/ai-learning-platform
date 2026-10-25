@@ -113,11 +113,11 @@ async def _update_db_document_status(
 
         from sqlalchemy import update
 
-        from app.core.database import async_session_maker
+        from app.core.database import AsyncSessionLocal
         from app.modules.documents.models import Document
 
         doc_uuid = uuid.UUID(document_id)
-        async with async_session_maker() as session:
+        async with AsyncSessionLocal() as session:
             stmt = (
                 update(Document)
                 .where(Document.id == doc_uuid)

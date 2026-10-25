@@ -76,6 +76,9 @@ export function LoginForm() {
       if (data?.access_token) {
         localStorage.setItem("auth_token", data.access_token)
       }
+      if (data?.user) {
+        localStorage.setItem("auth_user", JSON.stringify(data.user))
+      }
 
       setIsLoading(false)
       setFormData((prev) => ({ ...prev, password: "" }))
