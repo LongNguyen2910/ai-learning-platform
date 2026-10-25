@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import { AppSidebar } from "@/components/dashboard/app-sidebar"
 import { TopHeader } from "@/components/dashboard/top-header"
 import { DocumentUploadZone } from "@/components/dashboard/document-upload-zone"
@@ -10,12 +11,14 @@ import {
   fetchDocuments,
   deleteDocument,
   retryDocument,
+  getAuthToken,
   type DocumentItem,
   type DocumentUploadResponse,
 } from "@/lib/api/documents"
 import { RefreshCw } from "lucide-react"
 
 export function DashboardWorkspace() {
+  const router = useRouter()
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [documents, setDocuments] = React.useState<DocumentItem[]>([])
   const [isLoadingDocs, setIsLoadingDocs] = React.useState(true)
@@ -24,6 +27,18 @@ export function DashboardWorkspace() {
     null
   )
   const blobUrlMapRef = React.useRef<Record<string, string>>({})
+
+  const handleCacheBlobUrl = React.useCallback(
+    (docId: string, blobUrl: string) => {
+      blobUrlMapRef.current[docId] = blobUrl
+      setDocuments((prev) =>
+        prev.map((doc) =>
+          doc.document_id === docId ? { ...doc, localBlobUrl: blobUrl } : doc
+        )
+      )
+    },
+    []
+  )
 
   const loadDocuments = React.useCallback(async () => {
     try {
@@ -46,10 +61,14 @@ export function DashboardWorkspace() {
     await loadDocuments()
   }
 
-  // Initial load
+  // Initial auth check & load
   React.useEffect(() => {
+    if (!getAuthToken()) {
+      router.replace("/login")
+      return
+    }
     void loadDocuments()
-  }, [loadDocuments])
+  }, [loadDocuments, router])
 
   const hasProcessing = React.useMemo(
     () =>
@@ -93,6 +112,7 @@ export function DashboardWorkspace() {
     const now = new Date().toISOString()
     const newItem: DocumentItem = {
       document_id: res.document_id,
+      user_id: res.user_id,
       title: res.title,
       status: res.status,
       file_size_kb: Math.max(1, Math.round(file.size / 1024)),
@@ -170,6 +190,7 @@ export function DashboardWorkspace() {
             <DocumentViewer
               document={cachedViewerDocument}
               onBack={() => setSelectedDocId(null)}
+              onCacheBlobUrl={handleCacheBlobUrl}
             />
           </main>
         )}

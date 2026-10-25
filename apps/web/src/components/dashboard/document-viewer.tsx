@@ -12,7 +12,7 @@ import {
 } from "lucide-react"
 import {
   fetchDocumentContent,
-  getDocumentFileUrl,
+  fetchDocumentFileBlobUrl,
   type DocumentContentResponse,
   type DocumentItem,
 } from "@/lib/api/documents"
@@ -21,22 +21,30 @@ import { AiChatPlaceholder } from "@/components/dashboard/ai-chat-placeholder"
 interface DocumentViewerProps {
   document: DocumentItem
   onBack: () => void
+  onCacheBlobUrl?: (documentId: string, blobUrl: string) => void
 }
 
 type ReaderTab = "pdf" | "markdown"
 
-export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
+export function DocumentViewer({
+  document,
+  onBack,
+  onCacheBlobUrl,
+}: DocumentViewerProps) {
   const [activeTab, setActiveTab] = React.useState<ReaderTab>("pdf")
   const [isSplitChatOpen, setIsSplitChatOpen] = React.useState(false)
+  const [resolvedPdfBlobUrl, setResolvedPdfBlobUrl] = React.useState<
+    string | null
+  >(document.localBlobUrl ?? null)
+  const [isLoadingPdf, setIsLoadingPdf] = React.useState(
+    !document.localBlobUrl
+  )
+  const [pdfError, setPdfError] = React.useState<string | null>(null)
   const [contentData, setContentData] =
     React.useState<DocumentContentResponse | null>(null)
   const [isLoadingContent, setIsLoadingContent] = React.useState(false)
   const [contentError, setContentError] = React.useState<string | null>(null)
   const loadedDocIdRef = React.useRef<string | null>(null)
-
-  const rawPdfUrl =
-    document.localBlobUrl || getDocumentFileUrl(document.document_id)
-  const pdfViewerUrl = `${rawPdfUrl}#view=FitH`
 
   // Reset reader state only when switching to a different document ID
   React.useEffect(() => {
@@ -44,7 +52,51 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
     setContentData(null)
     setContentError(null)
     loadedDocIdRef.current = null
-  }, [document.document_id])
+    setResolvedPdfBlobUrl(document.localBlobUrl ?? null)
+    setIsLoadingPdf(!document.localBlobUrl)
+    setPdfError(null)
+  }, [document.document_id, document.localBlobUrl])
+
+  // Fetch authenticated PDF blob if not already cached in memory
+  React.useEffect(() => {
+    if (document.localBlobUrl) {
+      setResolvedPdfBlobUrl(document.localBlobUrl)
+      setIsLoadingPdf(false)
+      setPdfError(null)
+      return
+    }
+
+    let cancelled = false
+
+    const loadPdfBlob = async () => {
+      setIsLoadingPdf(true)
+      setPdfError(null)
+      try {
+        const blobUrl = await fetchDocumentFileBlobUrl(document.document_id)
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl)
+          return
+        }
+        setResolvedPdfBlobUrl(blobUrl)
+        onCacheBlobUrl?.(document.document_id, blobUrl)
+      } catch (err) {
+        if (!cancelled) {
+          setPdfError(
+            err instanceof Error ? err.message : "Could not load PDF file."
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPdf(false)
+        }
+      }
+    }
+
+    void loadPdfBlob()
+    return () => {
+      cancelled = true
+    }
+  }, [document.document_id, document.localBlobUrl, onCacheBlobUrl])
 
   // Load parsed markdown when user switches to the Markdown tab (cached once ready/parsed)
   React.useEffect(() => {
@@ -90,6 +142,10 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
       cancelled = true
     }
   }, [activeTab, document.document_id, document.status, contentData])
+
+  const pdfViewerUrl = resolvedPdfBlobUrl
+    ? `${resolvedPdfBlobUrl}#view=FitH`
+    : null
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-slate-50/70 dark:bg-slate-950">
@@ -148,16 +204,18 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
             </button>
           </div>
 
-          <a
-            href={rawPdfUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="Open PDF in new tab"
-            title="Open PDF in new tab"
-            className="hidden sm:inline-flex h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 dark:hover:text-white transition-colors"
-          >
-            <ExternalLink className="h-3.5 w-3.5 stroke-[1.8]" />
-          </a>
+          {resolvedPdfBlobUrl && (
+            <a
+              href={resolvedPdfBlobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open PDF in new tab"
+              title="Open PDF in new tab"
+              className="hidden sm:inline-flex h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:hover:bg-slate-900 dark:hover:text-white transition-colors"
+            >
+              <ExternalLink className="h-3.5 w-3.5 stroke-[1.8]" />
+            </a>
+          )}
 
           {/* Primary 50/50 Split-View AI Tutor Toggle Button */}
           <button
@@ -189,16 +247,31 @@ export function DocumentViewer({ document, onBack }: DocumentViewerProps) {
           <div
             className={
               activeTab === "pdf"
-                ? "flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900"
+                ? "flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900 flex flex-col"
                 : "hidden"
             }
           >
-            <iframe
-              key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
-              src={pdfViewerUrl}
-              title={`PDF Viewer - ${document.title}`}
-              className="w-full h-full border-0"
-            />
+            {isLoadingPdf ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400">
+                <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
+                <span className="text-xs font-medium">
+                  Loading PDF document...
+                </span>
+              </div>
+            ) : pdfError ? (
+              <div className="p-6">
+                <div className="max-w-lg mx-auto rounded-xl border border-rose-200/80 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 p-4 text-xs text-rose-600 dark:text-rose-400">
+                  {pdfError}
+                </div>
+              </div>
+            ) : pdfViewerUrl ? (
+              <iframe
+                key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
+                src={pdfViewerUrl}
+                title={`PDF Viewer - ${document.title}`}
+                className="w-full h-full border-0"
+              />
+            ) : null}
           </div>
 
           <div
