@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import app.core.models_registry
 from app.core.config import settings
 from app.modules.auth import auth_router
-from app.modules.documents import documents_router
+from app.modules.documents import documents_router, subjects_router
+from app.modules.roadmaps import roadmaps_router
 
 app = FastAPI(
     title="AI Learning Platform API",
@@ -24,7 +25,9 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(subjects_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
+app.include_router(roadmaps_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])
