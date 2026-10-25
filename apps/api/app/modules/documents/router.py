@@ -59,23 +59,39 @@ async def list_documents(
         db_docs = (await db.scalars(stmt)).all()
         if db_docs:
             items: list[DocumentStatusResponse] = []
+            dirty = False
             for d in db_docs:
                 doc_str = str(d.id)
                 meta = ingestion_service.load_metadata(doc_str)
+                if meta is None and not ingestion_service.get_document_pdf_path(doc_str):
+                    # Clean up orphaned DB row whose files were already deleted
+                    await db.delete(d)
+                    dirty = True
+                    continue
+
+                effective_status = meta.status if meta else d.status
+                effective_error = meta.error_message if meta else d.error_message
+                if meta and (d.status != meta.status or d.error_message != meta.error_message):
+                    d.status = meta.status
+                    d.error_message = meta.error_message
+                    dirty = True
+
                 items.append(
                     DocumentStatusResponse(
                         document_id=doc_str,
                         user_id=str(d.user_id),
                         title=d.title,
-                        status=d.status,
+                        status=effective_status,
                         file_size_kb=d.file_size_kb,
                         total_pages=d.total_pages,
                         parsed_pages=len(meta.pages) if meta else 0,
-                        error_message=d.error_message,
+                        error_message=effective_error,
                         created_at=d.created_at.isoformat() if d.created_at else "",
                         updated_at=meta.updated_at if meta else "",
                     )
                 )
+            if dirty:
+                await db.commit()
             return items
     except Exception as exc:
         logger.debug(
@@ -214,6 +230,7 @@ async def get_document_file(
         media_type="application/pdf",
         filename=filename,
         content_disposition_type="inline",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
@@ -273,8 +290,19 @@ async def get_document_content(
 async def delete_document(
     document_id: str,
     doc: Annotated[Document, Depends(get_valid_user_document)],
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
     success = ingestion_service.delete_document(document_id)
+    if db is not None and doc is not None:
+        try:
+            stmt = select(Document).where(Document.id == doc.id)
+            db_doc = await db.scalar(stmt)
+            if db_doc is not None:
+                await db.delete(db_doc)
+                await db.commit()
+                success = True
+        except Exception as exc:
+            logger.warning("Could not delete Document record from DB: %s", exc)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

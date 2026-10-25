@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.core.models_registry
 from app.core.config import settings
+from app.modules.auth import auth_router
 from app.modules.documents import documents_router, ingestion_service
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,6 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
 
-from app.modules.auth import auth_router
-from app.modules.documents import documents_router
 
 app = FastAPI(
     title="AI Learning Platform API",
