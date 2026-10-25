@@ -1,8 +1,18 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, func, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,8 +43,8 @@ class Subject(Base):
         index=True,
     )
     name: Mapped[str] = mapped_column(String(150), nullable=False)
-    code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     color_hex: Mapped[str] = mapped_column(
         String(10), default="#4F46E5", nullable=False
     )
@@ -46,19 +56,19 @@ class Subject(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="subjects")
-    documents: Mapped[List["Document"]] = relationship(
+    documents: Mapped[list["Document"]] = relationship(
         "Document", back_populates="subject"
     )
-    roadmaps: Mapped[List["Roadmap"]] = relationship(
+    roadmaps: Mapped[list["Roadmap"]] = relationship(
         "Roadmap", back_populates="subject", cascade="all, delete-orphan"
     )
-    study_sessions: Mapped[List["StudySession"]] = relationship(
+    study_sessions: Mapped[list["StudySession"]] = relationship(
         "StudySession", back_populates="subject"
     )
-    flashcard_decks: Mapped[List["FlashcardDeck"]] = relationship(
+    flashcard_decks: Mapped[list["FlashcardDeck"]] = relationship(
         "FlashcardDeck", back_populates="subject", cascade="all, delete-orphan"
     )
-    quizzes: Mapped[List["Quiz"]] = relationship(
+    quizzes: Mapped[list["Quiz"]] = relationship(
         "Quiz", back_populates="subject"
     )
 
@@ -77,7 +87,7 @@ class Document(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    subject_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("subjects.id", ondelete="SET NULL"),
         nullable=True,
@@ -93,7 +103,7 @@ class Document(Base):
     status: Mapped[str] = mapped_column(
         String(30), default="uploading", nullable=False
     )
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -110,18 +120,18 @@ class Document(Base):
     subject: Mapped[Optional["Subject"]] = relationship(
         "Subject", back_populates="documents"
     )
-    roadmap_nodes: Mapped[List["RoadmapNode"]] = relationship(
+    roadmap_nodes: Mapped[list["RoadmapNode"]] = relationship(
         "RoadmapNode", back_populates="document"
     )
-    study_sessions: Mapped[List["StudySession"]] = relationship(
+    study_sessions: Mapped[list["StudySession"]] = relationship(
         "StudySession", back_populates="document"
     )
-    chat_sessions: Mapped[List["ChatSession"]] = relationship(
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
         "ChatSession", back_populates="document", cascade="all, delete-orphan"
     )
-    flashcard_decks: Mapped[List["FlashcardDeck"]] = relationship(
+    flashcard_decks: Mapped[list["FlashcardDeck"]] = relationship(
         "FlashcardDeck", back_populates="document"
     )
-    quizzes: Mapped[List["Quiz"]] = relationship(
+    quizzes: Mapped[list["Quiz"]] = relationship(
         "Quiz", back_populates="document", cascade="all, delete-orphan"
     )

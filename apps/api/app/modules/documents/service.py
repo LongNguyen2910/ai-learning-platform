@@ -104,6 +104,31 @@ def format_user_friendly_error(stage: str, exc: Exception) -> str:
     return f"Lỗi ở bước [{stage}]: Đã xảy ra sự cố trong quá trình xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên."
 
 
+async def _update_db_document_status(
+    document_id: str, status: str, error_message: str | None = None
+) -> None:
+    """Updates Document status in Postgres asynchronously with an independent session."""
+    try:
+        import uuid
+
+        from sqlalchemy import update
+
+        from app.core.database import async_session_maker
+        from app.modules.documents.models import Document
+
+        doc_uuid = uuid.UUID(document_id)
+        async with async_session_maker() as session:
+            stmt = (
+                update(Document)
+                .where(Document.id == doc_uuid)
+                .values(status=status, error_message=error_message)
+            )
+            await session.execute(stmt)
+            await session.commit()
+    except Exception as exc:
+        logger.debug("DB status update skipped or failed for %s: %s", document_id, exc)
+
+
 class IngestionService:
     """Orchestrates PDF Ingestion Worker pipeline."""
 
@@ -237,6 +262,7 @@ class IngestionService:
         pdf_path: str | Path,
         title: str,
         force: bool = False,
+        user_id: str | None = None,
     ) -> DocumentMetadata:
         """Main Ingestion Worker execution method."""
         file_path = Path(pdf_path)
@@ -257,9 +283,12 @@ class IngestionService:
             metadata.total_pages = total_pages
             metadata.status = "parsing"
             metadata.error_message = None
+            if user_id:
+                metadata.user_id = str(user_id)
         else:
             metadata = DocumentMetadata(
                 document_id=document_id,
+                user_id=str(user_id) if user_id else None,
                 title=title,
                 file_path=str(file_path),
                 file_size_kb=file_size_kb,
@@ -267,10 +296,12 @@ class IngestionService:
                 status="parsing",
             )
         self.save_metadata(metadata)
+        await _update_db_document_status(document_id, "parsing")
         logger.info(
-            "Starting ingestion for document '%s' (ID: %s, Pages: %d)",
+            "Starting ingestion for document '%s' (ID: %s, User: %s, Pages: %d)",
             title,
             document_id,
+            user_id,
             total_pages,
         )
 
@@ -311,14 +342,18 @@ class IngestionService:
             metadata.pages = parsed_pages_meta
             metadata.error_message = None
             self.save_metadata(metadata)
+            await _update_db_document_status(document_id, "indexing")
             logger.info("Starting vector indexing for document ID: %s", document_id)
 
             # Execute Qdrant vector indexing
-            self.vector_service.index_document_pages(document_id, parsed_pages_meta)
+            self.vector_service.index_document_pages(
+                document_id, parsed_pages_meta, user_id=user_id or metadata.user_id
+            )
 
             # Mark document as ready
             metadata.status = "ready"
             self.save_metadata(metadata)
+            await _update_db_document_status(document_id, "ready")
             logger.info(
                 "Ingestion & indexing completed successfully for document ID: %s",
                 document_id,
@@ -334,6 +369,7 @@ class IngestionService:
             metadata.status = "failed"
             metadata.error_message = format_user_friendly_error(current_stage, exc)
             self.save_metadata(metadata)
+            await _update_db_document_status(document_id, "failed", metadata.error_message)
             raise
         finally:
             self.mark_task_inactive(document_id)
@@ -397,7 +433,9 @@ class IngestionService:
 
         return recovered_ids
 
-    def list_documents(self) -> list[DocumentStatusResponse]:
+    def list_documents(
+        self, user_id: str | None = None
+    ) -> list[DocumentStatusResponse]:
         if not self.parsed_base_dir.exists():
             return []
         items: list[DocumentStatusResponse] = []
@@ -405,6 +443,12 @@ class IngestionService:
             if entry.is_dir():
                 status_res = self.get_document_status(entry.name)
                 if status_res is not None:
+                    if (
+                        user_id is not None
+                        and status_res.user_id is not None
+                        and str(status_res.user_id) != str(user_id)
+                    ):
+                        continue
                     items.append(status_res)
         items.sort(key=lambda x: x.created_at, reverse=True)
         return items
@@ -415,6 +459,12 @@ class IngestionService:
             candidate = Path(metadata.file_path)
             if candidate.is_file():
                 return candidate
+        if metadata and metadata.user_id:
+            user_candidate = (
+                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
+            )
+            if user_candidate.is_file():
+                return user_candidate
         fallback = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
         if fallback.is_file():
             return fallback
@@ -426,6 +476,7 @@ class IngestionService:
             return None
         return DocumentStatusResponse(
             document_id=metadata.document_id,
+            user_id=metadata.user_id,
             title=metadata.title,
             status=metadata.status,
             file_size_kb=metadata.file_size_kb,
@@ -458,6 +509,7 @@ class IngestionService:
 
         return DocumentContentResponse(
             document_id=metadata.document_id,
+            user_id=metadata.user_id,
             title=metadata.title,
             status=metadata.status,
             total_pages=metadata.total_pages,
@@ -466,7 +518,7 @@ class IngestionService:
         )
 
     def delete_document(self, document_id: str) -> bool:
-        """Deletes all data associated with a document (uploaded file and parsed directory)."""
+        """Deletes all data associated with a document (uploaded file, parsed directory, DB record and vectors)."""
         self.mark_task_inactive(document_id)
         doc_dir = self.parsed_base_dir / document_id
         metadata = self.load_metadata(document_id)
@@ -474,6 +526,12 @@ class IngestionService:
         pdf_path = None
         if metadata and metadata.file_path:
             pdf_path = Path(metadata.file_path)
+        elif metadata and metadata.user_id:
+            candidate = (
+                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
+            )
+            if candidate.exists():
+                pdf_path = candidate
         else:
             default_pdf = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
             if default_pdf.exists():
@@ -488,6 +546,16 @@ class IngestionService:
                 pdf_path.unlink(missing_ok=True)
             except Exception as e:
                 logger.warning("Failed to delete PDF file %s: %s", pdf_path, e)
+
+        if metadata and metadata.user_id:
+            user_pdf = (
+                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
+            )
+            if user_pdf.exists():
+                try:
+                    user_pdf.unlink(missing_ok=True)
+                except Exception as e:
+                    logger.warning("Failed to delete user PDF %s: %s", user_pdf, e)
 
         default_pdf = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
         if default_pdf.exists():
@@ -506,6 +574,32 @@ class IngestionService:
             self.vector_service.delete_document_vectors(document_id)
         except Exception as e:
             logger.warning("Failed to delete vectors for document %s: %s", document_id, e)
+
+        # Asynchronously clean up PostgreSQL record if present
+        try:
+            import uuid
+
+            from sqlalchemy import delete
+
+            from app.core.database import async_session_maker
+            from app.modules.documents.models import Document
+
+            doc_uuid = uuid.UUID(document_id)
+
+            async def _cleanup_db():
+                async with async_session_maker() as session:
+                    await session.execute(
+                        delete(Document).where(Document.id == doc_uuid)
+                    )
+                    await session.commit()
+
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(_cleanup_db())
+            except RuntimeError:
+                asyncio.run(_cleanup_db())
+        except Exception as exc:
+            logger.debug("Failed to trigger DB cleanup for document %s: %s", document_id, exc)
 
         logger.info("Deleted document %s and its associated files and vectors", document_id)
         return True

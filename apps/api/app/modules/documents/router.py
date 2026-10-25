@@ -2,10 +2,12 @@ import logging
 import shutil
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
     BackgroundTasks,
+    Depends,
     File,
     Form,
     HTTPException,
@@ -14,8 +16,15 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.database import get_db
+from app.modules.auth.dependencies import get_current_active_user
+from app.modules.auth.models import User
+from app.modules.documents.dependencies import get_valid_user_document
+from app.modules.documents.models import Document
 from app.modules.documents.renderer import PDFPageRenderer
 from app.modules.documents.schemas import (
     DocumentContentResponse,
@@ -35,10 +44,45 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 @router.get(
     "",
     response_model=list[DocumentStatusResponse],
-    summary="List all uploaded documents",
+    summary="List all uploaded documents for current user",
 )
-async def list_documents():
-    return ingestion_service.list_documents()
+async def list_documents(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    try:
+        stmt = (
+            select(Document)
+            .where(Document.user_id == current_user.id)
+            .order_by(Document.created_at.desc())
+        )
+        db_docs = (await db.scalars(stmt)).all()
+        if db_docs:
+            items: list[DocumentStatusResponse] = []
+            for d in db_docs:
+                doc_str = str(d.id)
+                meta = ingestion_service.load_metadata(doc_str)
+                items.append(
+                    DocumentStatusResponse(
+                        document_id=doc_str,
+                        user_id=str(d.user_id),
+                        title=d.title,
+                        status=d.status,
+                        file_size_kb=d.file_size_kb,
+                        total_pages=d.total_pages,
+                        parsed_pages=len(meta.pages) if meta else 0,
+                        error_message=d.error_message,
+                        created_at=d.created_at.isoformat() if d.created_at else "",
+                        updated_at=meta.updated_at if meta else "",
+                    )
+                )
+            return items
+    except Exception as exc:
+        logger.debug(
+            "Could not query documents from DB, falling back to filesystem metadata: %s",
+            exc,
+        )
+    return ingestion_service.list_documents(user_id=str(current_user.id))
 
 
 @router.post(
@@ -51,6 +95,8 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF document file"),
     title: str | None = Form(None, description="Optional document display title"),
+    current_user: Annotated[User, Depends(get_current_active_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
@@ -61,7 +107,8 @@ async def upload_document(
     document_id = str(uuid.uuid4())
     doc_title = title or Path(file.filename).stem
 
-    upload_dir = Path(settings.UPLOAD_DIR)
+    user_prefix = str(current_user.id) if current_user else "shared"
+    upload_dir = Path(settings.UPLOAD_DIR) / user_prefix
     upload_dir.mkdir(parents=True, exist_ok=True)
     destination = upload_dir / f"{document_id}.pdf"
 
@@ -97,9 +144,28 @@ async def upload_document(
             detail=f"Invalid or corrupted PDF file: {exc}",
         )
 
+    # Save to PostgreSQL Document table if DB and current_user are present
+    if db is not None and current_user is not None:
+        try:
+            doc_record = Document(
+                id=uuid.UUID(document_id),
+                user_id=current_user.id,
+                title=doc_title,
+                file_path=str(destination),
+                file_type="pdf",
+                file_size_kb=max(1, int(file_size_bytes / 1024)),
+                total_pages=total_pages,
+                status="uploading",
+            )
+            db.add(doc_record)
+            await db.commit()
+        except Exception as exc:
+            logger.warning("Could not persist initial Document in DB: %s", exc)
+
     # Save initial metadata immediately so list/status queries see it right away
     initial_metadata = DocumentMetadata(
         document_id=document_id,
+        user_id=str(current_user.id) if current_user else None,
         title=doc_title,
         file_path=str(destination),
         file_size_kb=max(1, int(file_size_bytes / 1024)),
@@ -115,10 +181,12 @@ async def upload_document(
         document_id=document_id,
         pdf_path=destination,
         title=doc_title,
+        user_id=str(current_user.id) if current_user else None,
     )
 
     return DocumentUploadResponse(
         document_id=document_id,
+        user_id=str(current_user.id) if current_user else None,
         title=doc_title,
         status="uploading",
         total_pages=total_pages,
@@ -130,15 +198,17 @@ async def upload_document(
     "/{document_id}/file",
     summary="Stream raw PDF file for inline viewing",
 )
-async def get_document_file(document_id: str):
+async def get_document_file(
+    document_id: str,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
+):
     pdf_path = ingestion_service.get_document_pdf_path(document_id)
     if not pdf_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"PDF file for document '{document_id}' not found.",
         )
-    metadata = ingestion_service.load_metadata(document_id)
-    filename = f"{metadata.title if metadata else document_id}.pdf"
+    filename = f"{doc.title or document_id}.pdf"
     return FileResponse(
         path=pdf_path,
         media_type="application/pdf",
@@ -153,12 +223,24 @@ async def get_document_file(document_id: str):
     response_model=DocumentStatusResponse,
     summary="Get document parsing status",
 )
-async def get_document_status(document_id: str):
+async def get_document_status(
+    document_id: str,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
+):
     res = ingestion_service.get_document_status(document_id)
     if not res:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Document '{document_id}' not found.",
+        # Fallback response from DB Document model
+        return DocumentStatusResponse(
+            document_id=document_id,
+            user_id=str(doc.user_id),
+            title=doc.title,
+            status=doc.status,
+            file_size_kb=doc.file_size_kb,
+            total_pages=doc.total_pages,
+            parsed_pages=0,
+            error_message=doc.error_message,
+            created_at=doc.created_at.isoformat() if doc.created_at else "",
+            updated_at="",
         )
     return res
 
@@ -170,6 +252,7 @@ async def get_document_status(document_id: str):
 )
 async def get_document_content(
     document_id: str,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
     page: int | None = Query(
         None, description="1-indexed page number to retrieve", ge=1
     ),
@@ -188,7 +271,10 @@ async def get_document_content(
     response_model=DocumentDeleteResponse,
     summary="Delete a document and all associated files",
 )
-async def delete_document(document_id: str):
+async def delete_document(
+    document_id: str,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
+):
     success = ingestion_service.delete_document(document_id)
     if not success:
         raise HTTPException(
@@ -209,6 +295,7 @@ async def delete_document(document_id: str):
 )
 async def retry_document(
     document_id: str,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
     background_tasks: BackgroundTasks,
     force: bool = Query(
         False,
@@ -230,8 +317,8 @@ async def retry_document(
 
     pdf_path = Path(metadata.file_path)
     if not pdf_path.is_file():
-        fallback_pdf = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
-        if fallback_pdf.is_file():
+        fallback_pdf = ingestion_service.get_document_pdf_path(document_id)
+        if fallback_pdf and fallback_pdf.is_file():
             pdf_path = fallback_pdf
         else:
             raise HTTPException(
@@ -251,6 +338,7 @@ async def retry_document(
         pdf_path=pdf_path,
         title=metadata.title,
         force=force,
+        user_id=str(doc.user_id),
     )
 
     return DocumentRetryResponse(
