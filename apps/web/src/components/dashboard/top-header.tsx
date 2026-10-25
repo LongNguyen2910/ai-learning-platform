@@ -63,7 +63,8 @@ export function TopHeader({
     if (typeof window !== "undefined") {
       localStorage.removeItem("auth_token")
     }
-    router.push("/login")
+    router.replace("/login")
+    router.refresh()
   }
 
   return (

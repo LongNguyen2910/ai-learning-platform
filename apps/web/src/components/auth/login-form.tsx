@@ -19,6 +19,12 @@ export function LoginForm() {
   const [serverError, setServerError] = React.useState<string | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
 
+  // Ensure loading state is always reset when returning to /login (e.g. after logout or BFCache restore)
+  React.useEffect(() => {
+    setIsLoading(false)
+    setServerError(null)
+  }, [])
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
@@ -71,7 +77,9 @@ export function LoginForm() {
         localStorage.setItem("auth_token", data.access_token)
       }
 
-      router.push("/dashboard")
+      setIsLoading(false)
+      setFormData((prev) => ({ ...prev, password: "" }))
+      router.replace("/dashboard")
     } catch {
       setServerError("Unable to connect to authentication server. Please check your network or try again.")
       setIsLoading(false)
