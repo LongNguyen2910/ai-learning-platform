@@ -188,7 +188,10 @@ export function DocumentList({
                 </div>
 
                 {doc.status === "failed" && doc.error_message && (
-                  <p className="text-[11px] text-rose-500 truncate max-w-md mt-1">
+                  <p
+                    className="text-[11px] text-rose-500 line-clamp-2 max-w-md mt-1 font-medium"
+                    title={doc.error_message}
+                  >
                     {doc.error_message}
                   </p>
                 )}

@@ -47,12 +47,14 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str | None = None
     GEMINI_MODEL: str = "gemini-3.5-flash-lite"
     EMBEDDING_MODEL: str = "gemini-embedding-001"
+    EMBEDDING_DIMENSION: int = 3072
 
     # Storage (Anchored to the root storage directory outside apps/api)
     UPLOAD_DIR: str = str(PROJECT_ROOT / "storage" / "uploads")
     PARSED_DIR: str = str(PROJECT_ROOT / "storage" / "parsed")
     MAX_FILE_SIZE_MB: int = 50
     INGESTION_CONCURRENCY: int = 3
+    AUTO_RESUME_INGESTION_ON_STARTUP: bool = True
 
     @field_validator("UPLOAD_DIR", "PARSED_DIR", mode="after")
     @classmethod

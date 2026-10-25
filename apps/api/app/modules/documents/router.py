@@ -109,6 +109,7 @@ async def upload_document(
     ingestion_service.save_metadata(initial_metadata)
 
     # Dispatch ingestion worker task to background
+    ingestion_service.mark_task_active(document_id)
     background_tasks.add_task(
         ingestion_service.run_ingestion_pipeline,
         document_id=document_id,
@@ -220,7 +221,7 @@ async def retry_document(
             detail=f"Document '{document_id}' not found.",
         )
 
-    if metadata.status in ("parsing", "indexing"):
+    if ingestion_service.is_task_active(document_id):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Document '{document_id}' is currently being processed ({metadata.status}).",
@@ -242,6 +243,7 @@ async def retry_document(
     metadata.error_message = None
     ingestion_service.save_metadata(metadata)
 
+    ingestion_service.mark_task_active(document_id)
     background_tasks.add_task(
         ingestion_service.run_ingestion_pipeline,
         document_id=document_id,

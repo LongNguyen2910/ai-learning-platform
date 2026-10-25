@@ -31,22 +31,22 @@ class DocumentVectorService:
         qdrant_client: QdrantClient | None = None,
         embed_model: BaseEmbedding | None = None,
         collection_name: str | None = None,
-        vector_size: int = 3072,
+        vector_size: int | None = None,
         chunk_size: int = 768,
         chunk_overlap: int = 100,
     ) -> None:
         self._client = qdrant_client
         self._embed_model = embed_model
         self.collection_name = collection_name or settings.QDRANT_COLLECTION_NAME
-        self.vector_size = vector_size
+        self.vector_size = vector_size or getattr(settings, "EMBEDDING_DIMENSION", 3072)
         self.splitter = SentenceSplitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
 
     def get_client(self) -> QdrantClient:
-        """Returns or lazily creates a QdrantClient."""
+        """Returns or lazily creates a QdrantClient with timeout."""
         if self._client is None:
-            self._client = QdrantClient(url=settings.QDRANT_URL)
+            self._client = QdrantClient(url=settings.QDRANT_URL, timeout=30.0)
         return self._client
 
     def get_embed_model(self) -> BaseEmbedding:
@@ -69,7 +69,6 @@ class DocumentVectorService:
     def ensure_collection_ready(self) -> None:
         """Ensures the Qdrant collection exists with proper vector size and payload indexes."""
         client = self.get_client()
-        need_create = True
 
         if client.collection_exists(self.collection_name):
             try:
@@ -81,24 +80,21 @@ class DocumentVectorService:
                 elif isinstance(vectors_config, dict) and "" in vectors_config:
                     current_size = vectors_config[""].size
 
-                if current_size == self.vector_size:
-                    need_create = False
-                else:
-                    logger.warning(
-                        "Collection '%s' vector dimension mismatch (current: %s, target: %d). Recreating...",
-                        self.collection_name,
-                        current_size,
-                        self.vector_size,
+                if current_size != self.vector_size:
+                    raise ValueError(
+                        f"Collection '{self.collection_name}' dimension mismatch: "
+                        f"existing={current_size}, target={self.vector_size}. "
+                        "Manual migration or distinct collection name required to prevent data loss."
                     )
-                    client.delete_collection(self.collection_name)
             except Exception as exc:
+                if isinstance(exc, ValueError):
+                    raise
                 logger.warning(
                     "Could not inspect existing collection '%s': %s",
                     self.collection_name,
                     exc,
                 )
-
-        if need_create:
+        else:
             logger.info(
                 "Creating Qdrant collection '%s' (%d-dim, Cosine)",
                 self.collection_name,
@@ -193,24 +189,28 @@ class DocumentVectorService:
 
             content = page_path.read_text(encoding="utf-8").strip()
             # Skip empty pages or placeholder marker
-            if not content or content.startswith("<!-- Trang") and "để trống" in content:
+            if not content or (
+                content.startswith("<!-- Trang") and "để trống" in content
+            ):
                 continue
 
-            doc = Document(
+            # Assign unique doc_id per page to avoid document-level id collisions
+            page_doc = Document(
                 text=content,
-                doc_id=document_id,
+                doc_id=f"{document_id}_page_{page_meta.page_number}",
                 metadata={
+                    "doc_id": document_id,
                     "page_number": page_meta.page_number,
                     "has_formula": page_meta.has_formula,
                     "has_image": page_meta.has_image,
                 },
             )
 
-            page_nodes = self.splitter.get_nodes_from_documents([doc])
+            page_nodes = self.splitter.get_nodes_from_documents([page_doc])
             for node in page_nodes:
                 node.metadata["doc_id"] = document_id
                 node.metadata["chunk_index"] = global_chunk_idx
-                # Maintain source relationship
+                # Maintain source relationship pointing to document_id
                 node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(
                     node_id=document_id
                 )

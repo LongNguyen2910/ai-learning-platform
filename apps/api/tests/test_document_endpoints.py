@@ -98,9 +98,15 @@ def test_retry_document_already_parsing(client, temp_dirs):
     with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata.model_dump(), f)
 
-    response = client.post(f"/api/v1/documents/{doc_id}/retry")
-    assert response.status_code == 409
-    assert "currently being processed" in response.json()["detail"]
+    from app.modules.documents.service import ingestion_service
+
+    ingestion_service.mark_task_active(doc_id)
+    try:
+        response = client.post(f"/api/v1/documents/{doc_id}/retry")
+        assert response.status_code == 409
+        assert "currently being processed" in response.json()["detail"]
+    finally:
+        ingestion_service.mark_task_inactive(doc_id)
 
 
 def test_retry_document_already_indexing(client, temp_dirs):
@@ -123,9 +129,44 @@ def test_retry_document_already_indexing(client, temp_dirs):
     with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
         json.dump(metadata.model_dump(), f)
 
+    from app.modules.documents.service import ingestion_service
+
+    ingestion_service.mark_task_active(doc_id)
+    try:
+        response = client.post(f"/api/v1/documents/{doc_id}/retry")
+        assert response.status_code == 409
+        assert "currently being processed (indexing)" in response.json()["detail"]
+    finally:
+        ingestion_service.mark_task_inactive(doc_id)
+
+
+@patch("app.modules.documents.service.IngestionService.run_ingestion_pipeline")
+def test_retry_document_stale_parsing_allowed(
+    mock_run_pipeline, client, temp_dirs
+):
+    temp_upload, temp_parsed = temp_dirs
+    doc_id = "stale-parsing-doc-456"
+
+    pdf_file = temp_upload / f"{doc_id}.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 dummy")
+
+    doc_dir = temp_parsed / doc_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    metadata = DocumentMetadata(
+        document_id=doc_id,
+        title="Stale Parsing Doc",
+        file_path=str(pdf_file),
+        file_size_kb=5,
+        total_pages=1,
+        status="parsing",
+    )
+    with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata.model_dump(), f)
+
+    # Note: Not active in memory (simulating restart after crash)
     response = client.post(f"/api/v1/documents/{doc_id}/retry")
-    assert response.status_code == 409
-    assert "currently being processed (indexing)" in response.json()["detail"]
+    assert response.status_code == 202
+    assert response.json()["status"] == "parsing"
 
 
 def test_retry_document_missing_pdf_file(client, temp_dirs):
@@ -187,3 +228,90 @@ def test_retry_document_success(mock_run_pipeline, client, temp_dirs):
         saved_meta = json.load(f)
     assert saved_meta["status"] == "parsing"
     assert saved_meta["error_message"] is None
+
+
+@pytest.mark.asyncio
+async def test_recover_interrupted_documents_with_pdf(temp_dirs):
+    temp_upload, temp_parsed = temp_dirs
+    from app.modules.documents.service import IngestionService
+
+    doc_id = "interrupted-doc-111"
+    pdf_file = temp_upload / f"{doc_id}.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 dummy")
+
+    doc_dir = temp_parsed / doc_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    metadata = DocumentMetadata(
+        document_id=doc_id,
+        title="Interrupted Doc",
+        file_path=str(pdf_file),
+        file_size_kb=5,
+        total_pages=1,
+        status="parsing",
+    )
+    with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata.model_dump(), f)
+
+    service = IngestionService(parsed_base_dir=str(temp_parsed))
+    with patch.object(service, "run_ingestion_pipeline"):
+        recovered = await service.recover_interrupted_documents()
+        assert doc_id in recovered
+        assert service.is_task_active(doc_id)
+        # Clean up active state
+        service.mark_task_inactive(doc_id)
+
+
+@pytest.mark.asyncio
+async def test_recover_interrupted_documents_missing_pdf(temp_dirs):
+    temp_upload, temp_parsed = temp_dirs
+    from app.modules.documents.service import IngestionService
+
+    doc_id = "interrupted-missing-pdf-222"
+    doc_dir = temp_parsed / doc_id
+    doc_dir.mkdir(parents=True, exist_ok=True)
+    metadata = DocumentMetadata(
+        document_id=doc_id,
+        title="Missing PDF Interrupted",
+        file_path=str(temp_upload / "non-existent.pdf"),
+        file_size_kb=5,
+        total_pages=1,
+        status="indexing",
+    )
+    with open(doc_dir / "metadata.json", "w", encoding="utf-8") as f:
+        json.dump(metadata.model_dump(), f)
+
+    service = IngestionService(parsed_base_dir=str(temp_parsed))
+    recovered = await service.recover_interrupted_documents()
+    assert doc_id not in recovered
+    reloaded = service.load_metadata(doc_id)
+    assert reloaded.status == "failed"
+    assert "không tìm thấy file PDF gốc" in reloaded.error_message
+
+
+def test_format_user_friendly_error_messages():
+    from app.modules.documents.service import format_user_friendly_error
+
+    # Rate limit error
+    msg = format_user_friendly_error("Bóc tách nội dung AI", Exception("Resource has been exhausted (e.g. check quota). [429]"))
+    assert "Lỗi ở bước [Bóc tách nội dung AI]" in msg
+    assert "Vượt quá giới hạn lượt gọi API" in msg
+
+    # API key error
+    msg = format_user_friendly_error("Bóc tách nội dung AI", Exception("API_KEY_INVALID: API key not valid."))
+    assert "Lỗi ở bước [Bóc tách nội dung AI]" in msg
+    assert "Khóa API không hợp lệ" in msg
+
+    # Qdrant error
+    msg = format_user_friendly_error("Đánh chỉ mục vector", Exception("Qdrant connection refused on localhost:6333"))
+    assert "Lỗi ở bước [Đánh chỉ mục vector]" in msg
+    assert "Qdrant" in msg
+
+    # File permission / Security violation error
+    msg = format_user_friendly_error("Phân đoạn văn bản", PermissionError("Security Violation [pathsec.open]: refusing multiply-linked file"))
+    assert "Lỗi ở bước [Phân đoạn văn bản]" in msg
+    assert "quyền truy cập tập tin" in msg
+
+    # Corrupted PDF
+    msg = format_user_friendly_error("Đọc file PDF", Exception("FileDataError: cannot open corrupted stream"))
+    assert "Lỗi ở bước [Đọc file PDF]" in msg
+    assert "File PDF bị hỏng" in msg

@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from llama_index.core.embeddings import MockEmbedding
-from qdrant_client import QdrantClient, models
+from qdrant_client import QdrantClient
 
 from app.modules.documents.renderer import PDFPageRenderer
 from app.modules.documents.schemas import ParsedPageMetadata
@@ -39,6 +39,18 @@ def test_ensure_collection_ready(vector_service, memory_qdrant_client):
 
     vector_service.ensure_collection_ready()
 
+    assert memory_qdrant_client.collection_exists("test_learning_chunks")
+
+
+def test_ensure_collection_ready_dimension_mismatch_raises_error(
+    vector_service, memory_qdrant_client
+):
+    vector_service.ensure_collection_ready()
+    # Attempting to re-ensure with a different vector size must raise ValueError without deleting collection
+    vector_service.vector_size = 1536
+    with pytest.raises(ValueError, match="dimension mismatch"):
+        vector_service.ensure_collection_ready()
+    # Collection still exists
     assert memory_qdrant_client.collection_exists("test_learning_chunks")
 
 
