@@ -49,3 +49,6 @@ ignore = [
     "ASYNC230",  # Async functions opening local files synchronously in background task
     "BLE001",    # Catching generic Exception in outer service/retry handler
 ]
+
+[tool.uv]
+link-mode = "copy"
