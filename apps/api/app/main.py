@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+import app.core.models_registry
 from app.core.config import settings
 from app.modules.documents import documents_router, ingestion_service
 
@@ -26,6 +27,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
 
+from app.modules.auth import auth_router
+from app.modules.documents import documents_router
 
 app = FastAPI(
     title="AI Learning Platform API",
@@ -45,6 +48,7 @@ app.add_middleware(
 )
 
 # Routers
+app.include_router(auth_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 
 
