@@ -8,7 +8,8 @@ import app.core.models_registry
 from app.core.config import settings
 from app.modules.auth import auth_router
 from app.modules.chat import chat_router
-from app.modules.documents import documents_router, ingestion_service
+from app.modules.documents import documents_router, ingestion_service, subjects_router
+from app.modules.roadmaps import roadmaps_router
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +50,10 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(subjects_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
+app.include_router(roadmaps_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])

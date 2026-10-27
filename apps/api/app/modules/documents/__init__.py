@@ -11,6 +11,7 @@ from app.modules.documents.router import router as documents_router
 from app.modules.documents.service import IngestionService, ingestion_service
 from app.modules.documents.splitter import MarkdownStructureSplitter
 from app.modules.documents.storage import DocumentStorage, document_storage
+from app.modules.documents.subjects_router import subjects_router
 from app.modules.documents.vector_service import (
     DocumentVectorService,
     document_vector_service,
@@ -33,4 +34,5 @@ __all__ = [
     "document_vector_service",
     "documents_router",
     "ingestion_service",
+    "subjects_router",
 ]
