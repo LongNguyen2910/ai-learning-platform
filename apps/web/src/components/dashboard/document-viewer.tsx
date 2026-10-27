@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import dynamic from "next/dynamic"
 import {
   ArrowLeft,
   Columns2,
@@ -9,6 +10,7 @@ import {
   Loader2,
   ExternalLink,
   Sparkles,
+  GripVertical,
 } from "lucide-react"
 import {
   fetchDocumentContent,
@@ -18,6 +20,22 @@ import {
 } from "@/lib/api/documents"
 import { AiChatPlaceholder } from "@/components/dashboard/ai-chat-placeholder"
 
+const PdfCanvasViewer = dynamic(
+  () =>
+    import("@/components/dashboard/pdf-canvas-viewer").then(
+      (mod) => mod.PdfCanvasViewer
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400">
+        <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
+        <span className="text-xs font-medium">Initializing PDF reader...</span>
+      </div>
+    ),
+  }
+)
+
 interface DocumentViewerProps {
   document: DocumentItem
   onBack: () => void
@@ -26,6 +44,10 @@ interface DocumentViewerProps {
 
 type ReaderTab = "pdf" | "markdown"
 
+const MIN_SPLIT_PERCENT = 28
+const MAX_SPLIT_PERCENT = 72
+const DEFAULT_SPLIT_PERCENT = 52
+
 export function DocumentViewer({
   document,
   onBack,
@@ -33,6 +55,12 @@ export function DocumentViewer({
 }: DocumentViewerProps) {
   const [activeTab, setActiveTab] = React.useState<ReaderTab>("pdf")
   const [isSplitChatOpen, setIsSplitChatOpen] = React.useState(false)
+  const [splitRatio, setSplitRatio] = React.useState<number>(
+    DEFAULT_SPLIT_PERCENT
+  )
+  const [isDraggingSplit, setIsDraggingSplit] = React.useState(false)
+  const splitContainerRef = React.useRef<HTMLDivElement>(null)
+
   const [resolvedPdfBlobUrl, setResolvedPdfBlobUrl] = React.useState<
     string | null
   >(document.localBlobUrl ?? null)
@@ -102,7 +130,6 @@ export function DocumentViewer({
   React.useEffect(() => {
     if (activeTab !== "markdown") return
 
-    // Skip network fetch if we already cached the completed markdown for this document
     const isAlreadyFinal =
       contentData &&
       loadedDocIdRef.current === document.document_id &&
@@ -143,9 +170,51 @@ export function DocumentViewer({
     }
   }, [activeTab, document.document_id, document.status, contentData])
 
-  const pdfViewerUrl = resolvedPdfBlobUrl
-    ? `${resolvedPdfBlobUrl}#view=FitH`
-    : null
+  // Pointer drag handler for resizable split divider
+  const handleStartDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setIsDraggingSplit(true)
+  }
+
+  React.useEffect(() => {
+    if (!isDraggingSplit) return
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const container = splitContainerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      if (rect.width <= 0) return
+
+      const relativeX = e.clientX - rect.left
+      const rawPercent = (relativeX / rect.width) * 100
+      const clamped = Math.min(
+        MAX_SPLIT_PERCENT,
+        Math.max(MIN_SPLIT_PERCENT, rawPercent)
+      )
+      setSplitRatio(Math.round(clamped * 10) / 10)
+    }
+
+    const handlePointerUp = () => {
+      setIsDraggingSplit(false)
+    }
+
+    window.document.body.style.cursor = "col-resize"
+    window.document.body.style.userSelect = "none"
+    window.addEventListener("pointermove", handlePointerMove)
+    window.addEventListener("pointerup", handlePointerUp)
+    window.addEventListener("pointercancel", handlePointerUp)
+
+    return () => {
+      window.document.body.style.cursor = ""
+      window.document.body.style.userSelect = ""
+      window.removeEventListener("pointermove", handlePointerMove)
+      window.removeEventListener("pointerup", handlePointerUp)
+      window.removeEventListener("pointercancel", handlePointerUp)
+    }
+  }, [isDraggingSplit])
+
+  const leftPaneWidthPercent = isSplitChatOpen ? splitRatio : 100
+  const rightPaneWidthPercent = isSplitChatOpen ? 100 - splitRatio : 0
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-slate-50/70 dark:bg-slate-950">
@@ -173,7 +242,7 @@ export function DocumentViewer({
           </div>
         </div>
 
-        {/* Right: View Switcher (PDF / Markdown) + 50/50 AI Chat Split-View Toggle */}
+        {/* Right: View Switcher (PDF / Markdown) + Resizable AI Chat Split-View Toggle */}
         <div className="flex items-center gap-2.5 shrink-0">
           {/* Segmented View Control */}
           <div className="inline-flex items-center rounded-xl bg-slate-100 dark:bg-slate-900 p-0.5 border border-slate-200/70 dark:border-slate-800">
@@ -217,7 +286,7 @@ export function DocumentViewer({
             </a>
           )}
 
-          {/* Primary 50/50 Split-View AI Tutor Toggle Button */}
+          {/* Primary Split-View AI Tutor Toggle Button */}
           <button
             type="button"
             onClick={() => setIsSplitChatOpen((prev) => !prev)}
@@ -235,19 +304,25 @@ export function DocumentViewer({
         </div>
       </div>
 
-      {/* Main Content Area: 100% Full Width OR 50/50 Split-View */}
-      <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-        {/* Left Pane: Document Content (100% when chat closed, 50% when chat open) */}
+      {/* Main Content Area: Smooth Animated & Drag-Resizable Split-View */}
+      <div
+        ref={splitContainerRef}
+        className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden relative"
+      >
+        {/* Left Pane: Document Content */}
         <div
-          className={`h-full min-h-0 flex flex-col ${
-            isSplitChatOpen ? "w-full lg:w-1/2" : "w-full"
+          style={{ width: `${leftPaneWidthPercent}%` }}
+          className={`h-full min-h-0 flex flex-col max-lg:!w-full will-change-[width] ${
+            isDraggingSplit
+              ? "transition-none"
+              : "transition-[width] duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]"
           }`}
         >
-          {/* Keep PDF iframe mounted in DOM even when viewing Parsed Text tab to avoid reload lag */}
+          {/* Keep PDF viewer mounted in DOM even when viewing Parsed Text tab */}
           <div
             className={
               activeTab === "pdf"
-                ? "flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900 flex flex-col"
+                ? "flex-1 w-full h-full bg-slate-200/60 dark:bg-slate-900 flex flex-col min-h-0"
                 : "hidden"
             }
           >
@@ -264,12 +339,11 @@ export function DocumentViewer({
                   {pdfError}
                 </div>
               </div>
-            ) : pdfViewerUrl ? (
-              <iframe
-                key={`${document.document_id}-${isSplitChatOpen ? "split" : "full"}`}
-                src={pdfViewerUrl}
-                title={`PDF Viewer - ${document.title}`}
-                className="w-full h-full border-0"
+            ) : resolvedPdfBlobUrl ? (
+              <PdfCanvasViewer
+                key={document.document_id}
+                fileUrl={resolvedPdfBlobUrl}
+                title={document.title}
               />
             ) : null}
           </div>
@@ -315,15 +389,74 @@ export function DocumentViewer({
           </div>
         </div>
 
-        {/* Right Pane: 50% AI Tutor Split-View Placeholder */}
-        {isSplitChatOpen && (
-          <div className="w-full lg:w-1/2 h-1/2 lg:h-full min-h-0 shrink-0 animate-in fade-in-0 slide-in-from-right-4 duration-200">
+        {/* Interactive Drag-to-Resize Splitter Handle (Desktop) */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize PDF and AI Tutor panels"
+          aria-valuenow={Math.round(splitRatio)}
+          aria-valuemin={MIN_SPLIT_PERCENT}
+          aria-valuemax={MAX_SPLIT_PERCENT}
+          tabIndex={isSplitChatOpen ? 0 : -1}
+          title="Drag to resize panels (double-click to reset)"
+          onPointerDown={handleStartDrag}
+          onDoubleClick={() => setSplitRatio(DEFAULT_SPLIT_PERCENT)}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft") {
+              e.preventDefault()
+              setSplitRatio((r) => Math.max(MIN_SPLIT_PERCENT, r - 3))
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault()
+              setSplitRatio((r) => Math.min(MAX_SPLIT_PERCENT, r + 3))
+            }
+          }}
+          className={`hidden lg:flex w-0 z-20 items-center justify-center cursor-col-resize group select-none focus-visible:outline-none transition-opacity duration-300 ${
+            isSplitChatOpen
+              ? "opacity-100 pointer-events-auto"
+              : "opacity-0 pointer-events-none"
+          }`}
+        >
+          <div className="w-2.5 h-full flex items-center justify-center">
+            <div
+              className={`h-full w-[1px] transition-colors ${
+                isDraggingSplit
+                  ? "bg-[#0A77FF]"
+                  : "bg-slate-200/90 dark:bg-slate-800 group-hover:bg-[#0A77FF]"
+              }`}
+            />
+            <div
+              className={`absolute h-7 w-4 rounded-md border flex items-center justify-center shadow-2xs transition-all ${
+                isDraggingSplit
+                  ? "bg-[#0A77FF] border-[#0A77FF] text-white scale-105"
+                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-400 group-hover:border-[#0A77FF] group-hover:text-[#0A77FF]"
+              }`}
+            >
+              <GripVertical className="h-3.5 w-3.5 stroke-[2]" />
+            </div>
+          </div>
+        </div>
+
+        {/* Right Pane: Smoothly Animated & Resizable AI Tutor Panel */}
+        <div
+          style={{ width: `${rightPaneWidthPercent}%` }}
+          aria-hidden={!isSplitChatOpen}
+          className={`min-h-0 shrink-0 overflow-hidden will-change-[width,opacity] ${
+            isSplitChatOpen
+              ? "max-lg:!w-full h-1/2 lg:h-full opacity-100"
+              : "!w-0 h-0 lg:h-full opacity-0 pointer-events-none"
+          } ${
+            isDraggingSplit
+              ? "transition-none"
+              : "transition-[width,opacity] duration-350 ease-[cubic-bezier(0.16,1,0.3,1)]"
+          }`}
+        >
+          <div className="h-full w-full min-w-[300px]">
             <AiChatPlaceholder
               document={document}
               onClose={() => setIsSplitChatOpen(false)}
             />
           </div>
-        )}
+        </div>
       </div>
     </div>
   )
