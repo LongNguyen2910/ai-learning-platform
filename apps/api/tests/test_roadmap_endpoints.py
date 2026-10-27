@@ -485,3 +485,49 @@ def test_list_subject_roadmaps_forbidden(client: TestClient, other_user: User):
 
         response = client.get(f"/api/v1/roadmaps/subject/{subject_id}")
         assert response.status_code == 403
+
+
+def test_generate_roadmap_endpoint_with_session_mode(client: TestClient, mock_user: User):
+    subject_id = uuid.uuid4()
+    document_id = uuid.uuid4()
+    future_date = date.today() + timedelta(days=14)
+
+    payload = {
+        "subject_id": str(subject_id),
+        "document_id": str(document_id),
+        "title": "Lộ trình Deep Work",
+        "target_date": future_date.isoformat(),
+        "available_hours_per_day": 2.0,
+        "session_mode": "deep_work",
+    }
+
+    with (
+        patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls,
+        patch("app.modules.roadmaps.router._execute_roadmap_pipeline") as mock_pipeline,
+    ):
+        mock_repo = mock_repo_cls.return_value
+        fake_subject = Subject(id=subject_id, user_id=mock_user.id, name="Vật lý đại cương")
+        fake_doc = Document(id=document_id, user_id=mock_user.id, title="Doc 1", status="ready")
+        fake_roadmap = Roadmap(
+            id=uuid.uuid4(),
+            user_id=mock_user.id,
+            subject_id=subject_id,
+            title=payload["title"],
+            target_date=future_date,
+            available_hours_per_day=2.0,
+            status="generating",
+            progress_percentage=0.0,
+            created_at=datetime.now(UTC),
+        )
+        mock_repo.get_subject_by_id = AsyncMock(return_value=fake_subject)
+        mock_repo.get_document_by_id = AsyncMock(return_value=fake_doc)
+        mock_repo.create_roadmap = AsyncMock(return_value=fake_roadmap)
+
+        response = client.post("/api/v1/roadmaps/generate", json=payload)
+
+        assert response.status_code == 202
+        data = response.json()
+        assert data["roadmap_id"] == str(fake_roadmap.id)
+        mock_pipeline.assert_called_once()
+        req_arg = mock_pipeline.call_args[0][2]
+        assert req_arg.session_mode.value == "deep_work"

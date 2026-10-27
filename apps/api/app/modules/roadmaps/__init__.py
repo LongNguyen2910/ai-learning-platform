@@ -4,15 +4,23 @@ from app.modules.roadmaps.roadmap_tree_builder import RoadmapTreeBuilder
 from app.modules.roadmaps.router import router as roadmaps_router
 from app.modules.roadmaps.service import RoadmapService
 from app.modules.roadmaps.study_block_pacing_calculator import (
+    AllocatedStudyBlock,
+    PlannedChapterNode,
+    PlannedTopicNode,
     StudyBlockPacingCalculator,
+    StudySessionMode,
 )
 
 __all__ = [
+    "AllocatedStudyBlock",
+    "PlannedChapterNode",
+    "PlannedTopicNode",
     "Roadmap",
     "RoadmapNode",
     "RoadmapRepository",
     "RoadmapService",
     "RoadmapTreeBuilder",
     "StudyBlockPacingCalculator",
+    "StudySessionMode",
     "roadmaps_router",
 ]

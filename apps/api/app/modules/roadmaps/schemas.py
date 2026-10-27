@@ -3,6 +3,8 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.modules.roadmaps.domain.study_session_mode import StudySessionMode
+
 
 class RawStudyTopic(BaseModel):
     """Pydantic schema representing a topic extracted by LLM from curriculum."""
@@ -46,13 +48,17 @@ class RawCurriculumOutline(BaseModel):
 
 
 class RoadmapGenerateRequest(BaseModel):
-    """DTO for initiating initial roadmap tree generation (FR-12)."""
+    """DTO for initiating initial roadmap tree generation (FR-12 & FR-13)."""
 
     subject_id: uuid.UUID
     document_id: uuid.UUID
     title: str = Field(min_length=2, max_length=255)
     target_date: date
     available_hours_per_day: float = Field(default=2.0, ge=0.5, le=12.0)
+    session_mode: StudySessionMode = Field(
+        default=StudySessionMode.AUTO,
+        description="Chế độ phân bổ Study Blocks: auto, micro (15-30p), deep_work (45-90p)",
+    )
     study_goal: str | None = Field(
         default=None,
         description="Mục tiêu cụ thể của người học (ví dụ: thi qua môn điểm A, nắm chắc chương 1-3)",

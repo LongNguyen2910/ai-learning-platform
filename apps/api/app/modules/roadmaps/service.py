@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 
 class RoadmapService:
-    """Application Service orchestrating initial Roadmap Tree generation (FR-12)."""
+    """Application Service orchestrating initial Roadmap Tree generation (FR-12 & FR-13)."""
 
     def __init__(
         self,
@@ -133,6 +133,7 @@ class RoadmapService:
                 target_date=req.target_date,
                 today=today,
                 hours_per_day=req.available_hours_per_day,
+                session_mode=req.session_mode,
             )
 
             self._update_task(task_id, 80, "Đang dựng cấu trúc cây 3 tầng...")
