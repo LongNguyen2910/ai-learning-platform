@@ -18,7 +18,10 @@ import {
   type DocumentContentResponse,
   type DocumentItem,
 } from "@/lib/api/documents"
-import { AiChatPlaceholder } from "@/components/dashboard/ai-chat-placeholder"
+import type { ChatCitation } from "@/lib/api/chat"
+import type { HighlightedPageTarget } from "@/components/dashboard/pdf-canvas-viewer"
+import { AiTutorChatPanel } from "@/components/dashboard/ai-tutor-chat-panel"
+import { ChatMarkdownRenderer } from "@/components/dashboard/chat-markdown-renderer"
 
 const PdfCanvasViewer = dynamic(
   () =>
@@ -72,13 +75,31 @@ export function DocumentViewer({
     React.useState<DocumentContentResponse | null>(null)
   const [isLoadingContent, setIsLoadingContent] = React.useState(false)
   const [contentError, setContentError] = React.useState<string | null>(null)
+  const [currentPage, setCurrentPage] = React.useState<number>(1)
+  const [highlightedPage, setHighlightedPage] =
+    React.useState<HighlightedPageTarget | null>(null)
   const loadedDocIdRef = React.useRef<string | null>(null)
+
+  const handleSelectCitationPage = React.useCallback(
+    (pageNumber: number, citation?: ChatCitation) => {
+      setActiveTab("pdf")
+      setCurrentPage(pageNumber)
+      setHighlightedPage({
+        page: pageNumber,
+        nonce: Date.now(),
+        excerpt: citation?.content,
+      })
+    },
+    []
+  )
 
   // Reset reader state only when switching to a different document ID
   React.useEffect(() => {
     setActiveTab("pdf")
     setContentData(null)
     setContentError(null)
+    setCurrentPage(1)
+    setHighlightedPage(null)
     loadedDocIdRef.current = null
     setResolvedPdfBlobUrl(document.localBlobUrl ?? null)
     setIsLoadingPdf(!document.localBlobUrl)
@@ -293,8 +314,8 @@ export function DocumentViewer({
             aria-pressed={isSplitChatOpen}
             className={`h-8 px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 cursor-pointer active:scale-[0.98] ${
               isSplitChatOpen
-                ? "bg-[#0A77FF] text-white shadow-[0_4px_12px_-2px_rgba(10,119,255,0.45)]"
-                : "bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300"
+                ? "bg-indigo-600 text-white shadow-[0_4px_12px_-2px_rgba(79,70,229,0.45)]"
+                : "bg-indigo-600/10 hover:bg-indigo-600/15 text-indigo-600 dark:bg-indigo-500/20 dark:text-indigo-300"
             }`}
           >
             <Sparkles className="h-3.5 w-3.5 stroke-[2]" />
@@ -328,7 +349,7 @@ export function DocumentViewer({
           >
             {isLoadingPdf ? (
               <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400">
-                <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
+                <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
                 <span className="text-xs font-medium">
                   Loading PDF document...
                 </span>
@@ -344,6 +365,8 @@ export function DocumentViewer({
                 key={document.document_id}
                 fileUrl={resolvedPdfBlobUrl}
                 title={document.title}
+                highlightedPage={highlightedPage}
+                onCurrentPageChange={setCurrentPage}
               />
             ) : null}
           </div>
@@ -358,7 +381,7 @@ export function DocumentViewer({
             <div className="max-w-3xl mx-auto">
               {isLoadingContent ? (
                 <div className="py-16 flex flex-col items-center justify-center gap-2 text-slate-400">
-                  <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
+                  <Loader2 className="h-5 w-5 animate-spin text-indigo-600" />
                   <span className="text-xs font-medium">
                     Loading extracted Markdown content...
                   </span>
@@ -368,10 +391,11 @@ export function DocumentViewer({
                   {contentError}
                 </div>
               ) : contentData?.full_content ? (
-                <article className="prose prose-slate dark:prose-invert max-w-none">
-                  <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-slate-800 dark:text-slate-200 bg-transparent p-0 border-0">
-                    {contentData.full_content}
-                  </pre>
+                <article className="prose prose-slate dark:prose-invert max-w-none text-sm leading-relaxed text-slate-800 dark:text-slate-200">
+                  <ChatMarkdownRenderer
+                    content={contentData.full_content}
+                    onSelectPage={handleSelectCitationPage}
+                  />
                 </article>
               ) : (
                 <div className="py-16 text-center space-y-2">
@@ -420,15 +444,15 @@ export function DocumentViewer({
             <div
               className={`h-full w-[1px] transition-colors ${
                 isDraggingSplit
-                  ? "bg-[#0A77FF]"
-                  : "bg-slate-200/90 dark:bg-slate-800 group-hover:bg-[#0A77FF]"
+                  ? "bg-indigo-600"
+                  : "bg-slate-200/90 dark:bg-slate-800 group-hover:bg-indigo-600"
               }`}
             />
             <div
               className={`absolute h-7 w-4 rounded-md border flex items-center justify-center shadow-2xs transition-all ${
                 isDraggingSplit
-                  ? "bg-[#0A77FF] border-[#0A77FF] text-white scale-105"
-                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-400 group-hover:border-[#0A77FF] group-hover:text-[#0A77FF]"
+                  ? "bg-indigo-600 border-indigo-600 text-white scale-105"
+                  : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-400 group-hover:border-indigo-600 group-hover:text-indigo-600"
               }`}
             >
               <GripVertical className="h-3.5 w-3.5 stroke-[2]" />
@@ -451,8 +475,10 @@ export function DocumentViewer({
           }`}
         >
           <div className="h-full w-full min-w-[300px]">
-            <AiChatPlaceholder
+            <AiTutorChatPanel
               document={document}
+              currentPage={currentPage}
+              onSelectCitationPage={handleSelectCitationPage}
               onClose={() => setIsSplitChatOpen(false)}
             />
           </div>

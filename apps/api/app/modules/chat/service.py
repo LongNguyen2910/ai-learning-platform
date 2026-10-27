@@ -329,6 +329,9 @@ class SocraticChatService:
                         "page_number": c.page_number,
                         "score": c.score,
                         "citation_tag": c.citation_tag,
+                        "content": c.content,
+                        "has_formula": c.has_formula,
+                        "has_image": c.has_image,
                     }
                     for c in chunks
                 ]
@@ -372,9 +375,12 @@ class SocraticChatService:
                 "page_number": c.page_number,
                 "score": c.score,
                 "citation_tag": c.citation_tag,
+                "content": c.content,
+                "has_formula": c.has_formula,
+                "has_image": c.has_image,
             }
             for c in chunks
-            if c.citation_tag in answer
+            if c.citation_tag in answer or f"Trang {c.page_number}" in answer
         ]
 
         saved = await self.repository.add_message(

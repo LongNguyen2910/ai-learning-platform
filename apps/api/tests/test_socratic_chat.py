@@ -79,6 +79,21 @@ class FakeRepository:
     async def get_session(self, session_id):
         return self.sessions.get(session_id)
 
+    async def delete_session(self, session_id):
+        if session_id not in self.sessions:
+            return False
+        self.sessions.pop(session_id, None)
+        self.messages = [m for m in self.messages if m.session_id != session_id]
+        return True
+
+    async def list_sessions(self, user_id, document_id=None, limit=20):
+        items = [
+            s
+            for s in self.sessions.values()
+            if s.user_id == user_id and (document_id is None or s.document_id == document_id)
+        ]
+        return list(reversed(items))[:limit]
+
     async def list_recent_messages(self, session_id, limit=20):
         return [m for m in self.messages if m.session_id == session_id][-limit:]
 

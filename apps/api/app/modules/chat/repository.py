@@ -28,6 +28,29 @@ class ChatRepository:
         async with self.session_factory() as db:
             return await db.scalar(select(Document).where(Document.id == document_id))
 
+    async def ensure_document_from_metadata(
+        self, document_id: uuid.UUID, user_id: uuid.UUID, meta: Any
+    ) -> Document:
+        async with self.session_factory() as db:
+            existing = await db.scalar(select(Document).where(Document.id == document_id))
+            if existing is not None:
+                return existing
+            doc = Document(
+                id=document_id,
+                user_id=user_id,
+                title=meta.title,
+                file_path=meta.file_path,
+                file_type="pdf",
+                file_size_kb=meta.file_size_kb,
+                total_pages=meta.total_pages,
+                status=meta.status,
+                error_message=meta.error_message,
+            )
+            db.add(doc)
+            await db.commit()
+            await db.refresh(doc)
+            return doc
+
     async def create_session(
         self, user_id: uuid.UUID, document_id: uuid.UUID, title: str
     ) -> ChatSession:
@@ -41,6 +64,33 @@ class ChatRepository:
     async def get_session(self, session_id: uuid.UUID) -> ChatSession | None:
         async with self.session_factory() as db:
             return await db.scalar(select(ChatSession).where(ChatSession.id == session_id))
+
+    async def delete_session(self, session_id: uuid.UUID) -> bool:
+        async with self.session_factory() as db:
+            session = await db.scalar(
+                select(ChatSession).where(ChatSession.id == session_id)
+            )
+            if session is None:
+                return False
+            await db.delete(session)
+            await db.commit()
+            return True
+
+    async def list_sessions(
+        self,
+        user_id: uuid.UUID,
+        document_id: uuid.UUID | None = None,
+        limit: int = 20,
+    ) -> list[ChatSession]:
+        """Trả về danh sách phiên hội thoại của học viên (mới nhất trước)."""
+        async with self.session_factory() as db:
+            stmt = select(ChatSession).where(ChatSession.user_id == user_id)
+            if document_id is not None:
+                stmt = stmt.where(ChatSession.document_id == document_id)
+            stmt = stmt.order_by(desc(ChatSession.created_at), desc(ChatSession.id)).limit(
+                limit
+            )
+            return list((await db.scalars(stmt)).all())
 
     async def list_recent_messages(
         self, session_id: uuid.UUID, limit: int = 20

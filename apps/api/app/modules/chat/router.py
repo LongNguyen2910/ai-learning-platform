@@ -174,6 +174,23 @@ async def _get_owned_session(
     return session
 
 
+@router.get(
+    "/sessions",
+    response_model=list[ChatSessionResponse],
+    summary="List chat sessions for the current user (optionally filtered by document)",
+)
+async def list_chat_sessions(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    repository: Annotated[ChatRepository, Depends(get_chat_repository)],
+    document_id: Annotated[uuid.UUID | None, Query(description="Filter by document UUID")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> list[ChatSessionResponse]:
+    sessions = await repository.list_sessions(
+        user_id=current_user.id, document_id=document_id, limit=limit
+    )
+    return [ChatSessionResponse.model_validate(s) for s in sessions]
+
+
 @router.post(
     "/sessions",
     response_model=ChatSessionResponse,
@@ -186,6 +203,18 @@ async def create_chat_session(
     repository: Annotated[ChatRepository, Depends(get_chat_repository)],
 ) -> ChatSessionResponse:
     doc = await repository.get_document(payload.document_id)
+    if doc is None:
+        meta = ingestion_service.load_metadata(str(payload.document_id))
+        if (
+            meta is not None
+            and hasattr(repository, "ensure_document_from_metadata")
+            and (meta.user_id is None or str(meta.user_id) == str(current_user.id))
+        ):
+            doc = await repository.ensure_document_from_metadata(
+                document_id=payload.document_id,
+                user_id=current_user.id,
+                meta=meta,
+            )
     if doc is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -203,6 +232,20 @@ async def create_chat_session(
         user_id=current_user.id, document_id=payload.document_id, title=payload.title
     )
     return ChatSessionResponse.model_validate(session)
+
+
+@router.delete(
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a chat session and all its messages",
+)
+async def delete_chat_session(
+    session_id: uuid.UUID,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    repository: Annotated[ChatRepository, Depends(get_chat_repository)],
+) -> None:
+    await _get_owned_session(session_id, current_user, repository)
+    await repository.delete_session(session_id)
 
 
 @router.get(
