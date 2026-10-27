@@ -3,7 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -12,17 +12,22 @@ from app.modules.auth.models import User
 from app.modules.auth.security import TokenManager
 from app.modules.auth.service import auth_service
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/api/v1/auth/login",
-    auto_error=True,
-)
+http_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(http_bearer)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     try:
+        token = credentials.credentials
         payload = TokenManager.decode_access_token(token)
         sub = payload.get("sub")
         if not sub:
