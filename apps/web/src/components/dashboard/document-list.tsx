@@ -69,7 +69,7 @@ function StatusIndicator({
     status === "indexing"
       ? "Indexing vectors..."
       : status === "parsing" && totalPages > 0
-      ? `Parsing ${parsedPages}/${totalPages}p`
+      ? `Parsing ${parsedPages}/${totalPages} pages`
       : "Processing..."
 
   return (

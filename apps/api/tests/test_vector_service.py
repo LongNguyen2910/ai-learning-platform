@@ -238,3 +238,85 @@ async def test_ingestion_service_smart_resume_skips_gemini_vision():
         mock_parser.parse_page_image.assert_not_called()
         # Vector service should still be called to index the document
         mock_vector_service.index_document_pages.assert_called_once()
+
+
+def test_index_document_pages_batching(vector_service, tmp_path, monkeypatch):
+    """Verifies that large number of nodes are processed in batches rather than all-at-once."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 2)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+
+    # Create 5 page files
+    pages_meta = []
+    for i in range(1, 6):
+        page_file = tmp_path / f"batch_page_{i}.md"
+        page_file.write_text(f"Nội dung trang số {i} với các thông tin chi tiết.", encoding="utf-8")
+        pages_meta.append(
+            ParsedPageMetadata(
+                page_number=i,
+                has_formula=False,
+                has_image=False,
+                char_count=50,
+                file_path=str(page_file),
+            )
+        )
+
+    insert_calls = []
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    original_insert = VectorStoreIndex.insert_nodes
+
+    def tracking_insert(self, nodes, **kwargs):
+        insert_calls.append(len(nodes))
+        return original_insert(self, nodes, **kwargs)
+
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", tracking_insert)
+
+    total = vector_service.index_document_pages("doc_batch_test", pages_meta)
+    assert total == 5
+    # 5 nodes with batch_size=2 should be 2 + 2 + 1 = 3 batches
+    assert insert_calls == [2, 2, 1]
+
+
+def test_index_document_pages_retry_on_429(vector_service, tmp_path, monkeypatch):
+    """Verifies that 429 rate limit errors trigger backoff and retry successfully."""
+    from app.core.config import settings
+    import app.modules.documents.vector_service as vs_mod
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 5)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_RETRIES", 3)
+
+    page_file = tmp_path / "page_retry.md"
+    page_file.write_text("Nội dung cần test retry khi gặp lỗi hạn ngạch 429.", encoding="utf-8")
+    pages_meta = [
+        ParsedPageMetadata(
+            page_number=1,
+            has_formula=False,
+            has_image=False,
+            char_count=50,
+            file_path=str(page_file),
+        )
+    ]
+
+    attempts = {"count": 0}
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    original_insert = VectorStoreIndex.insert_nodes
+
+    def flaky_insert(self, nodes, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("429 Resource Exhausted: Rate limit exceeded")
+        return original_insert(self, nodes, **kwargs)
+
+    sleep_calls = []
+    monkeypatch.setattr(vs_mod.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", flaky_insert)
+
+    total = vector_service.index_document_pages("doc_retry_test", pages_meta)
+    assert total == 1
+    assert attempts["count"] == 2
+    assert len(sleep_calls) == 1
+    assert sleep_calls[0] > 0

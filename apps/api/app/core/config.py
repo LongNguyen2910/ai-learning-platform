@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     PARSED_DIR: str = str(PROJECT_ROOT / "storage" / "parsed")
     MAX_FILE_SIZE_MB: int = 50
     INGESTION_CONCURRENCY: int = 3
+    INGESTION_BATCH_SIZE: int = 5
+    HYBRID_ROUTING_ENABLED: bool = True
+    HYBRID_ROUTER_MAX_DRAWINGS: int = 5
+    HYBRID_ROUTER_MIN_TEXT_CHARS: int = 30
+    EMBEDDING_BATCH_SIZE: int = 50
+    EMBEDDING_BATCH_DELAY_SECONDS: float = 1.0
+    EMBEDDING_MAX_RETRIES: int = 4
     AUTO_RESUME_INGESTION_ON_STARTUP: bool = True
 
     @field_validator("UPLOAD_DIR", "PARSED_DIR", mode="after")

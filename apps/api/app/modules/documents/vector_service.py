@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import time
 from typing import Any
 
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -19,6 +20,7 @@ from qdrant_client import QdrantClient, models
 
 from app.core.config import settings
 from app.modules.documents.schemas import ParsedPageMetadata
+from app.modules.documents.splitter import MarkdownStructureSplitter
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,10 @@ class DocumentVectorService:
         self._embed_model = embed_model
         self.collection_name = collection_name or settings.QDRANT_COLLECTION_NAME
         self.vector_size = vector_size or getattr(settings, "EMBEDDING_DIMENSION", 3072)
+        self.structure_splitter = MarkdownStructureSplitter(
+            target_chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap,
+        )
         self.splitter = SentenceSplitter(
             chunk_size=chunk_size, chunk_overlap=chunk_overlap
         )
@@ -53,9 +59,15 @@ class DocumentVectorService:
         """Returns or lazily initializes the embedding model."""
         if self._embed_model is None:
             model_name = settings.EMBEDDING_MODEL
+            batch_size = max(1, getattr(settings, "EMBEDDING_BATCH_SIZE", 50))
             self._embed_model = GoogleGenAIEmbedding(
                 model_name=model_name,
                 api_key=settings.GEMINI_API_KEY,
+                embed_batch_size=batch_size,
+                retries=getattr(settings, "EMBEDDING_MAX_RETRIES", 4),
+                retry_min_seconds=2.0,
+                retry_max_seconds=30.0,
+                retry_exponential_base=2.0,
             )
         return self._embed_model
 
@@ -121,6 +133,10 @@ class DocumentVectorService:
             field_name="page_number",
             field_schema=models.PayloadSchemaType.INTEGER,
         )
+        self._create_payload_index_safe(
+            field_name="section_heading",
+            field_schema=models.PayloadSchemaType.KEYWORD,
+        )
 
     def _create_payload_index_safe(
         self, field_name: str, field_schema: models.PayloadSchemaType
@@ -175,6 +191,7 @@ class DocumentVectorService:
         document_id: str,
         pages_meta: list[ParsedPageMetadata],
         user_id: str | None = None,
+        doc_title: str | None = None,
     ) -> int:
         """Chunks each page markdown file and indexes into Qdrant with metadata.
 
@@ -199,32 +216,15 @@ class DocumentVectorService:
             ):
                 continue
 
-            # Assign unique doc_id per page to avoid document-level id collisions
-            node_metadata: dict[str, Any] = {
-                "doc_id": document_id,
-                "page_number": page_meta.page_number,
-                "has_formula": page_meta.has_formula,
-                "has_image": page_meta.has_image,
-            }
-            if user_id:
-                node_metadata["user_id"] = str(user_id)
-
-            page_doc = Document(
-                text=content,
-                doc_id=f"{document_id}_page_{page_meta.page_number}",
-                metadata=node_metadata,
+            page_nodes = self.structure_splitter.split_page_to_nodes(
+                content=content,
+                page_number=page_meta.page_number,
+                doc_id=document_id,
+                user_id=user_id,
+                doc_title=doc_title,
+                start_chunk_idx=global_chunk_idx,
             )
-
-            page_nodes = self.splitter.get_nodes_from_documents([page_doc])
             for node in page_nodes:
-                node.metadata["doc_id"] = document_id
-                node.metadata["chunk_index"] = global_chunk_idx
-                if user_id:
-                    node.metadata["user_id"] = str(user_id)
-                # Maintain source relationship pointing to document_id
-                node.relationships[NodeRelationship.SOURCE] = RelatedNodeInfo(
-                    node_id=document_id
-                )
                 all_nodes.append(node)
                 global_chunk_idx += 1
 
@@ -244,7 +244,62 @@ class DocumentVectorService:
             vector_store=vector_store,
             embed_model=self.get_embed_model(),
         )
-        index.insert_nodes(all_nodes)
+
+        # Batch indexing with adaptive rate-limiting and 429 backoff
+        batch_size = max(1, getattr(settings, "EMBEDDING_BATCH_SIZE", 50))
+        throttle_seconds = getattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 1.0)
+        max_retries = getattr(settings, "EMBEDDING_MAX_RETRIES", 4)
+        total_batches = (len(all_nodes) + batch_size - 1) // batch_size
+
+        for i in range(0, len(all_nodes), batch_size):
+            batch_nodes = all_nodes[i : i + batch_size]
+            batch_idx = (i // batch_size) + 1
+
+            attempt = 0
+            while True:
+                try:
+                    logger.info(
+                        "Indexing batch %d/%d (%d nodes) for doc_id=%s (attempt %d)",
+                        batch_idx,
+                        total_batches,
+                        len(batch_nodes),
+                        document_id,
+                        attempt + 1,
+                    )
+                    index.insert_nodes(batch_nodes)
+                    break
+                except Exception as exc:
+                    attempt += 1
+                    err_msg = str(exc).lower()
+                    is_rate_limit = any(
+                        k in err_msg
+                        for k in ("429", "quota", "resource_exhausted", "too many requests")
+                    )
+                    if attempt < max_retries and is_rate_limit:
+                        backoff = (2 ** attempt) * 2.0  # 4s, 8s, 16s...
+                        logger.warning(
+                            "Embedding rate limit (429) hit on batch %d/%d for doc_id=%s. Backing off for %.1fs (attempt %d/%d)...",
+                            batch_idx,
+                            total_batches,
+                            document_id,
+                            backoff,
+                            attempt,
+                            max_retries,
+                        )
+                        time.sleep(backoff)
+                    else:
+                        logger.exception(
+                            "Failed to index batch %d/%d for doc_id=%s: %s",
+                            batch_idx,
+                            total_batches,
+                            document_id,
+                            exc,
+                        )
+                        raise
+
+            # Throttle between batches to stay safely within RPM limits
+            if i + batch_size < len(all_nodes) and throttle_seconds > 0:
+                time.sleep(throttle_seconds)
 
         logger.info(
             "Successfully indexed %d chunks for doc_id=%s",

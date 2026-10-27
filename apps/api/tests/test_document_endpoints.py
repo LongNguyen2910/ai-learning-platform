@@ -330,3 +330,27 @@ def test_format_user_friendly_error_messages():
     msg = format_user_friendly_error("Đọc file PDF", Exception("FileDataError: cannot open corrupted stream"))
     assert "Lỗi ở bước [Đọc file PDF]" in msg
     assert "File PDF bị hỏng" in msg
+
+
+def test_count_parsed_pages_live_progress(temp_dirs):
+    """Verifies that parsed_pages counts non-empty page files on disk in real-time during parsing."""
+    from app.modules.documents.service import IngestionService
+
+    _upload_dir, parsed_dir = temp_dirs
+    service = IngestionService(parsed_base_dir=str(parsed_dir))
+
+    doc_id = "test_live_progress_doc"
+    doc_dir = service.get_document_dir(doc_id, create=True)
+    pages_dir = doc_dir / "pages"
+
+    # Initially 0
+    assert service.count_parsed_pages(doc_id) == 0
+
+    # Write 3 page files
+    (pages_dir / "page_1.md").write_text("# Trang 1", encoding="utf-8")
+    (pages_dir / "page_2.md").write_text("# Trang 2", encoding="utf-8")
+    (pages_dir / "page_3.md").write_text("# Trang 3", encoding="utf-8")
+    # Empty 0-byte file (in-progress placeholder) should not be counted
+    (pages_dir / "page_4.md").write_text("", encoding="utf-8")
+
+    assert service.count_parsed_pages(doc_id) == 3

@@ -1,12 +1,22 @@
+"""Document Ingestion Service orchestrating PDF preprocessing, OCR, and vector indexing."""
+
 import asyncio
-import json
 import logging
-import re
-import shutil
-from datetime import UTC, datetime
 from pathlib import Path
+import re
+import uuid
+
+import pymupdf
+from sqlalchemy import delete
 
 from app.core.config import settings
+from app.core.database import async_session_maker
+from app.modules.documents.errors import format_user_friendly_error
+from app.modules.documents.hybrid_router import (
+    HybridPageRouter,
+    PageRoute,
+)
+from app.modules.documents.models import Document
 from app.modules.documents.renderer import PDFPageRenderer
 from app.modules.documents.schemas import (
     DocumentContentResponse,
@@ -14,94 +24,17 @@ from app.modules.documents.schemas import (
     DocumentStatusResponse,
     ParsedPageMetadata,
 )
+from app.modules.documents.storage import DocumentStorage, document_storage
 from app.modules.documents.vector_service import (
     DocumentVectorService,
     document_vector_service,
 )
-from app.modules.documents.vision_parser import GeminiVisionParser
+from app.modules.documents.vision_parser import (
+    GeminiVisionParser,
+    is_retryable_exception,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def format_user_friendly_error(stage: str, exc: Exception) -> str:
-    """Translates raw Python exceptions into clear, localized Vietnamese error messages
-
-    describing the specific pipeline stage that failed without leaking sensitive server traces.
-    """
-    err_str = str(exc).lower()
-
-    # Rate limit / Quota
-    if any(
-        k in err_str
-        for k in (
-            "429",
-            "resource_exhausted",
-            "quota",
-            "too many requests",
-            "rate limit",
-        )
-    ):
-        return f"Lỗi ở bước [{stage}]: Vượt quá giới hạn lượt gọi API (Rate limit / Quota). Vui lòng thử lại sau ít phút."
-
-    # API Key / Authentication
-    if any(
-        k in err_str
-        for k in (
-            "api_key",
-            "unauthenticated",
-            "invalid_argument",
-            "permission_denied",
-            "forbidden",
-            "401",
-            "403",
-        )
-    ):
-        return f"Lỗi ở bước [{stage}]: Khóa API không hợp lệ hoặc không có quyền truy cập. Vui lòng kiểm tra cấu hình API Key."
-
-    # Qdrant / Vector DB
-    if "qdrant" in err_str or "dimension mismatch" in err_str:
-        if "dimension mismatch" in err_str:
-            return f"Lỗi ở bước [{stage}]: Kích thước vector embedding không khớp với cấu hình cơ sở dữ liệu Qdrant."
-        return f"Lỗi ở bước [{stage}]: Không thể kết nối hoặc lưu dữ liệu vào cơ sở dữ liệu vector Qdrant."
-
-    # Network / Timeout
-    if any(
-        k in err_str
-        for k in (
-            "timeout",
-            "timed out",
-            "connecterror",
-            "connection error",
-            "remotedisconnected",
-            "connection refused",
-        )
-    ):
-        return f"Lỗi ở bước [{stage}]: Kết nối mạng bị gián đoạn hoặc quá thời gian chờ (Timeout). Vui lòng thử lại."
-
-    # PDF / Corrupted file
-    if any(
-        k in err_str
-        for k in (
-            "filedataerror",
-            "emptyfileerror",
-            "cannot open",
-            "corrupt",
-            "not a pdf",
-            "bad pdf",
-        )
-    ):
-        return f"Lỗi ở bước [{stage}]: File PDF bị hỏng, mã hóa bảo vệ hoặc không thể đọc được nội dung."
-
-    # Permission / File system security
-    if (
-        isinstance(exc, PermissionError)
-        or "permissionerror" in err_str
-        or "pathsec" in err_str
-    ):
-        return f"Lỗi ở bước [{stage}]: Lỗi quyền truy cập tập tin hệ thống trên máy chủ."
-
-    # Fallback with stage name
-    return f"Lỗi ở bước [{stage}]: Đã xảy ra sự cố trong quá trình xử lý. Vui lòng thử lại hoặc liên hệ quản trị viên."
 
 
 async def _update_db_document_status(
@@ -109,15 +42,10 @@ async def _update_db_document_status(
 ) -> None:
     """Updates Document status in Postgres asynchronously with an independent session."""
     try:
-        import uuid
-
+        doc_uuid = uuid.UUID(document_id)
         from sqlalchemy import update
 
-        from app.core.database import AsyncSessionLocal
-        from app.modules.documents.models import Document
-
-        doc_uuid = uuid.UUID(document_id)
-        async with AsyncSessionLocal() as session:
+        async with async_session_maker() as session:
             stmt = (
                 update(Document)
                 .where(Document.id == doc_uuid)
@@ -130,20 +58,29 @@ async def _update_db_document_status(
 
 
 class IngestionService:
-    """Orchestrates PDF Ingestion Worker pipeline."""
+    """Orchestrates PDF Ingestion Worker pipeline: Preprocessing, Vision OCR, and Qdrant Indexing."""
 
     def __init__(
         self,
         renderer: PDFPageRenderer | None = None,
         vision_parser: GeminiVisionParser | None = None,
         vector_service: DocumentVectorService | None = None,
-        parsed_base_dir: str | None = None,
+        parsed_base_dir: str | Path | None = None,
+        router: HybridPageRouter | None = None,
+        storage: DocumentStorage | None = None,
     ):
         self.renderer = renderer or PDFPageRenderer()
         self.vision_parser = vision_parser or GeminiVisionParser()
         self.vector_service = vector_service or document_vector_service
-        self._parsed_base_dir = parsed_base_dir
+        self.router = router or HybridPageRouter()
+        self.storage = storage or (
+            DocumentStorage(parsed_base_dir=parsed_base_dir)
+            if parsed_base_dir
+            else document_storage
+        )
         self._active_tasks: set[str] = set()
+
+    # --- In-memory Task Tracking ---
 
     def mark_task_active(self, document_id: str) -> None:
         """Marks a document as currently being processed in memory."""
@@ -157,39 +94,49 @@ class IngestionService:
         """Checks if a document task is actively running in the current server process."""
         return document_id in self._active_tasks
 
+    # --- Storage Delegation (Maintains 100% Backward Compatibility) ---
+
     @property
     def parsed_base_dir(self) -> Path:
-        base = Path(self._parsed_base_dir or settings.PARSED_DIR)
-        base.mkdir(parents=True, exist_ok=True)
-        return base
+        return self.storage.parsed_base_dir
 
     def get_document_dir(self, document_id: str, create: bool = False) -> Path:
-        doc_dir = self.parsed_base_dir / document_id
-        if create:
-            doc_dir.mkdir(parents=True, exist_ok=True)
-            (doc_dir / "pages").mkdir(parents=True, exist_ok=True)
-        return doc_dir
+        return self.storage.get_document_dir(document_id, create=create)
 
     def get_metadata_path(self, document_id: str) -> Path:
-        return self.get_document_dir(document_id, create=False) / "metadata.json"
+        return self.storage.get_metadata_path(document_id)
 
     def get_full_doc_path(self, document_id: str) -> Path:
-        return self.get_document_dir(document_id, create=False) / "full_document.md"
+        return self.storage.get_full_doc_path(document_id)
 
     def save_metadata(self, metadata: DocumentMetadata) -> None:
-        self.get_document_dir(metadata.document_id, create=True)
-        path = self.get_metadata_path(metadata.document_id)
-        metadata.updated_at = datetime.now(UTC).isoformat()
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(metadata.model_dump(), f, ensure_ascii=False, indent=2)
+        self.storage.save_metadata(metadata)
 
     def load_metadata(self, document_id: str) -> DocumentMetadata | None:
-        path = self.get_metadata_path(document_id)
-        if not path.is_file():
-            return None
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return DocumentMetadata.model_validate(data)
+        return self.storage.load_metadata(document_id)
+
+    def count_parsed_pages(
+        self, document_id: str, metadata: DocumentMetadata | None = None
+    ) -> int:
+        return self.storage.count_parsed_pages(document_id, metadata=metadata)
+
+    def get_document_status(self, document_id: str) -> DocumentStatusResponse | None:
+        return self.storage.get_document_status(document_id)
+
+    def get_document_content(
+        self, document_id: str, page_number: int | None = None
+    ) -> DocumentContentResponse | None:
+        return self.storage.get_document_content(document_id, page_number=page_number)
+
+    def get_document_pdf_path(self, document_id: str) -> Path | None:
+        return self.storage.get_document_pdf_path(document_id)
+
+    def list_documents(
+        self, user_id: str | None = None
+    ) -> list[DocumentStatusResponse]:
+        return self.storage.list_documents(user_id=user_id)
+
+    # --- Page & Batch Processing ---
 
     async def _process_single_page(
         self,
@@ -201,17 +148,11 @@ class IngestionService:
         """Renders and parses a single page, saving its markdown file."""
         page_file = doc_pages_dir / f"page_{page_num}.md"
 
-        # Smart caching: check if page markdown is already parsed and non-empty
         if not force and page_file.is_file():
             content = page_file.read_text(encoding="utf-8")
             if content.strip():
-                logger.info(
-                    "Page %d already parsed, reusing cached markdown",
-                    page_num,
-                )
-                has_formula = "$$" in content or bool(
-                    re.search(r"(?<!\\)\$[^$]+\$", content)
-                )
+                logger.info("Page %d already parsed, reusing cached markdown", page_num)
+                has_formula = "$$" in content or bool(re.search(r"(?<!\\)\$[^$]+\$", content))
                 has_image = "[Hình vẽ trang" in content or "![" in content
                 meta = ParsedPageMetadata(
                     page_number=page_num,
@@ -222,10 +163,6 @@ class IngestionService:
                 )
                 return page_num, content, meta
             else:
-                logger.warning(
-                    "Page %d file exists but is empty/corrupt; deleting and re-parsing",
-                    page_num,
-                )
                 page_file.unlink(missing_ok=True)
 
         # Fast-path: Check if page is empty
@@ -243,18 +180,65 @@ class IngestionService:
             )
             return page_num, content, meta
 
-        # Render page to PNG in RAM
+        # Render page to PNG in RAM and parse with Gemini Vision
         png_bytes = self.renderer.render_page_to_png_bytes(pdf_path, page_num)
-
-        # Call Gemini Vision parser
         content, meta = await self.vision_parser.parse_page_image(png_bytes, page_num)
 
-        # Save individual page markdown
         with open(page_file, "w", encoding="utf-8") as f:
             f.write(content)
 
         meta.file_path = str(page_file)
         return page_num, content, meta
+
+    async def _process_page_batch(
+        self,
+        pdf_path: Path,
+        batch_page_nums: list[int],
+        doc_pages_dir: Path,
+    ) -> list[tuple[int, str, ParsedPageMetadata]]:
+        """Renders and parses a batch of pages together using Gemini Vision batching."""
+        pages_to_parse = [
+            (page_num, self.renderer.render_page_to_png_bytes(pdf_path, page_num))
+            for page_num in batch_page_nums
+        ]
+
+        batch_results: list[tuple[int, str, ParsedPageMetadata]] = []
+
+        if hasattr(self.vision_parser, "parse_page_images_batch") and callable(
+            self.vision_parser.parse_page_images_batch
+        ):
+            try:
+                coro = self.vision_parser.parse_page_images_batch(pages_to_parse)
+                if asyncio.iscoroutine(coro):
+                    parsed_dict = await coro
+                    if isinstance(parsed_dict, dict) and all(
+                        p in parsed_dict for p in batch_page_nums
+                    ):
+                        for page_num in batch_page_nums:
+                            content, meta = parsed_dict[page_num]
+                            page_file = doc_pages_dir / f"page_{page_num}.md"
+                            with open(page_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            meta.file_path = str(page_file)
+                            batch_results.append((page_num, content, meta))
+                        return batch_results
+            except Exception as e:
+                err_s = str(e).lower()
+                if not is_retryable_exception(e) or any(k in err_s for k in ("quota", "429")):
+                    raise
+                logger.warning(
+                    "Batch parser encountered error: %s. Falling back to single page parsing...",
+                    e,
+                )
+
+        # Fallback to single page processing
+        for page_num in batch_page_nums:
+            res = await self._process_single_page(pdf_path, page_num, doc_pages_dir)
+            batch_results.append(res)
+
+        return batch_results
+
+    # --- Main Pipeline Orchestrator ---
 
     async def run_ingestion_pipeline(
         self,
@@ -268,12 +252,10 @@ class IngestionService:
         file_path = Path(pdf_path)
         doc_dir = self.get_document_dir(document_id, create=True)
         pages_dir = doc_dir / "pages"
-        current_stage = "Kiểm tra file PDF"
 
         file_size_kb = int(file_path.stat().st_size / 1024) if file_path.exists() else 0
         total_pages = self.renderer.get_page_count(file_path)
 
-        # Preserve original metadata fields (e.g. created_at) if already present
         existing_meta = self.load_metadata(document_id)
         if existing_meta:
             metadata = existing_meta
@@ -307,17 +289,139 @@ class IngestionService:
 
         self.mark_task_active(document_id)
         try:
-            # Stage 1: Bóc tách nội dung AI
-            current_stage = "Bóc tách nội dung bằng AI"
-            tasks = [
-                self._process_single_page(
-                    file_path, page_num, pages_dir, force=force
-                )
-                for page_num in range(1, total_pages + 1)
-            ]
-            results = await asyncio.gather(*tasks)
+            # Stage 1: parse content using AI & Smart Hybrid Routing
+            results: list[tuple[int, str, ParsedPageMetadata]] = []
+            pages_to_batch: list[int] = []
 
-            # Sort results by page_number
+            if force and pages_dir.is_dir():
+                for old_p in pages_dir.glob("page_*.md"):
+                    old_p.unlink(missing_ok=True)
+
+            pdf_doc = None
+            try:
+                pdf_doc = pymupdf.open(str(file_path))
+            except Exception as e:
+                logger.debug("Could not open %s with pymupdf directly: %s", file_path, e)
+
+            try:
+                for page_num in range(1, total_pages + 1):
+                    page_file = pages_dir / f"page_{page_num}.md"
+                    if not force and page_file.is_file():
+                        content = page_file.read_text(encoding="utf-8")
+                        if content.strip():
+                            logger.info("Page %d already parsed, reusing cached markdown", page_num)
+                            has_formula = "$$" in content or bool(re.search(r"(?<!\\)\$[^$]+\$", content))
+                            has_image = "[Hình vẽ trang" in content or "![" in content
+                            meta = ParsedPageMetadata(
+                                page_number=page_num,
+                                has_formula=has_formula,
+                                has_image=has_image,
+                                char_count=len(content),
+                                file_path=str(page_file),
+                            )
+                            results.append((page_num, content, meta))
+                            continue
+                        else:
+                            page_file.unlink(missing_ok=True)
+
+                    # Smart Hybrid Routing: Text-First, Vision-Fallback
+                    if getattr(settings, "HYBRID_ROUTING_ENABLED", True):
+                        classification = self.router.classify_page(
+                            file_path, page_num, pdf_doc=pdf_doc
+                        )
+                        if classification.route == PageRoute.EMPTY:
+                            logger.info("Page %d is empty, skipping Vision API", page_num)
+                            content = f"<!-- Trang {page_num} để trống -->"
+                            with open(page_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            meta = ParsedPageMetadata(
+                                page_number=page_num,
+                                has_formula=False,
+                                has_image=False,
+                                char_count=0,
+                                file_path=str(page_file),
+                            )
+                            results.append((page_num, content, meta))
+                            continue
+                        elif (
+                            classification.route == PageRoute.LOCAL_TEXT
+                            and classification.extracted_markdown
+                        ):
+                            logger.info(
+                                "Page %d routed to Local CPU text extraction (0 tokens, reason: %s)",
+                                page_num,
+                                classification.reason,
+                            )
+                            content = classification.extracted_markdown
+                            with open(page_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            has_formula = "$$" in content or bool(re.search(r"(?<!\\)\$[^$]+\$", content))
+                            has_image = "[Hình vẽ trang" in content or "![" in content
+                            meta = ParsedPageMetadata(
+                                page_number=page_num,
+                                has_formula=has_formula,
+                                has_image=has_image,
+                                char_count=len(content),
+                                file_path=str(page_file),
+                            )
+                            results.append((page_num, content, meta))
+                            continue
+                        else:
+                            logger.info(
+                                "Page %d requires Gemini Vision OCR (reason: %s)",
+                                page_num,
+                                classification.reason,
+                            )
+                            pages_to_batch.append(page_num)
+                    else:
+                        if self.renderer.is_page_empty(file_path, page_num):
+                            logger.info("Page %d is empty, skipping Gemini call", page_num)
+                            content = f"<!-- Trang {page_num} để trống -->"
+                            with open(page_file, "w", encoding="utf-8") as f:
+                                f.write(content)
+                            meta = ParsedPageMetadata(
+                                page_number=page_num,
+                                has_formula=False,
+                                has_image=False,
+                                char_count=0,
+                                file_path=str(page_file),
+                            )
+                            results.append((page_num, content, meta))
+                            continue
+
+                        pages_to_batch.append(page_num)
+            finally:
+                if pdf_doc is not None:
+                    try:
+                        pdf_doc.close()
+                    except Exception:
+                        pass
+
+            # Dynamic Vision Batching (5 pages/request)
+            batch_size = max(1, getattr(settings, "INGESTION_BATCH_SIZE", 5))
+            batches = [
+                pages_to_batch[i : i + batch_size]
+                for i in range(0, len(pages_to_batch), batch_size)
+            ]
+
+            if batches:
+                try:
+                    async with asyncio.TaskGroup() as tg:
+                        batch_tasks = [
+                            tg.create_task(
+                                self._process_page_batch(file_path, batch, pages_dir)
+                            )
+                            for batch in batches
+                        ]
+                    for t in batch_tasks:
+                        results.extend(t.result())
+                except* Exception as eg:
+                    first_exc = eg.exceptions[0]
+                    while hasattr(first_exc, "exceptions") and first_exc.exceptions:
+                        first_exc = first_exc.exceptions[0]
+                    raise first_exc
+
+            # Sort results by page_number deterministically
             results.sort(key=lambda r: r[0])
 
             parsed_pages_meta: list[ParsedPageMetadata] = []
@@ -329,15 +433,13 @@ class IngestionService:
                     f"<!-- PAGE_BREAK: {page_num} -->\n\n{content}\n"
                 )
 
-            # Stage 2: Lưu trữ tài liệu Markdown
-            current_stage = "Lưu trữ nội dung Markdown"
+            # Stage 2: Store markdown content
             full_markdown = "\n".join(combined_blocks)
             full_doc_path = self.get_full_doc_path(document_id)
             with open(full_doc_path, "w", encoding="utf-8") as f:
                 f.write(full_markdown)
 
-            # Stage 3: Đánh chỉ mục Vector vào Qdrant
-            current_stage = "Đánh chỉ mục vector vào cơ sở dữ liệu"
+            # Stage 3: Index Vector into Qdrant
             metadata.status = "indexing"
             metadata.pages = parsed_pages_meta
             metadata.error_message = None
@@ -345,29 +447,26 @@ class IngestionService:
             await _update_db_document_status(document_id, "indexing")
             logger.info("Starting vector indexing for document ID: %s", document_id)
 
-            # Execute Qdrant vector indexing
             self.vector_service.index_document_pages(
-                document_id, parsed_pages_meta, user_id=user_id or metadata.user_id
+                document_id,
+                parsed_pages_meta,
+                user_id=user_id or metadata.user_id,
+                doc_title=title or metadata.title,
             )
 
-            # Mark document as ready
             metadata.status = "ready"
             self.save_metadata(metadata)
             await _update_db_document_status(document_id, "ready")
-            logger.info(
-                "Ingestion & indexing completed successfully for document ID: %s",
-                document_id,
-            )
+            logger.info("Ingestion & indexing completed for document ID: %s", document_id)
             return metadata
 
         except Exception as exc:
             logger.exception(
-                "Ingestion failed for document ID: %s at stage '%s'",
+                "Ingestion failed for document ID: %s",
                 document_id,
-                current_stage,
             )
             metadata.status = "failed"
-            metadata.error_message = format_user_friendly_error(current_stage, exc)
+            metadata.error_message = format_user_friendly_error(exc)
             self.save_metadata(metadata)
             await _update_db_document_status(document_id, "failed", metadata.error_message)
             raise
@@ -396,194 +495,68 @@ class IngestionService:
             if not metadata:
                 continue
 
-            # Check if stuck in transient states
-            if metadata.status in ("uploading", "parsing", "indexing"):
+            if metadata.status in ("parsing", "indexing", "uploading"):
                 if self.is_task_active(document_id):
                     continue
 
                 pdf_path = self.get_document_pdf_path(document_id)
-                if pdf_path and pdf_path.is_file():
-                    logger.warning(
-                        "Found interrupted document '%s' (ID: %s, Status: %s). Resuming ingestion pipeline...",
-                        metadata.title,
+                if not pdf_path or not pdf_path.is_file():
+                    logger.error(
+                        "Cannot recover %s: original PDF file missing at %s",
                         document_id,
-                        metadata.status,
+                        pdf_path,
                     )
-                    self.mark_task_active(document_id)
+                    metadata.status = "failed"
+                    metadata.error_message = (
+                        "Không thể khôi phục tài liệu: không tìm thấy file PDF gốc trên hệ thống."
+                    )
+                    self.save_metadata(metadata)
+                    await _update_db_document_status(document_id, "failed", metadata.error_message)
+                    continue
+
+                logger.info(
+                    "Auto-recovering interrupted document %s (status: %s, file: %s)",
+                    document_id,
+                    metadata.status,
+                    pdf_path,
+                )
+                recovered_ids.append(document_id)
+                self.mark_task_active(document_id)
+                try:
                     asyncio.create_task(
                         self.run_ingestion_pipeline(
                             document_id=document_id,
                             pdf_path=pdf_path,
                             title=metadata.title,
                             force=False,
+                            user_id=metadata.user_id,
                         )
                     )
-                    recovered_ids.append(document_id)
-                else:
-                    logger.error(
-                        "Interrupted document '%s' (ID: %s) has no valid PDF file on disk. Marking as failed.",
-                        metadata.title,
-                        document_id,
-                    )
+                except Exception as exc:
+                    logger.error("Failed to spawn recovery task for %s: %s", document_id, exc)
                     metadata.status = "failed"
-                    metadata.error_message = (
-                        "Quá trình xử lý bị gián đoạn do server dừng và không tìm thấy file PDF gốc."
-                    )
+                    metadata.error_message = f"Lỗi khôi phục tự động: {exc}"
                     self.save_metadata(metadata)
 
         return recovered_ids
 
-    def list_documents(
-        self, user_id: str | None = None
-    ) -> list[DocumentStatusResponse]:
-        if not self.parsed_base_dir.exists():
-            return []
-        items: list[DocumentStatusResponse] = []
-        for entry in self.parsed_base_dir.iterdir():
-            if entry.is_dir():
-                status_res = self.get_document_status(entry.name)
-                if status_res is not None:
-                    if (
-                        user_id is not None
-                        and status_res.user_id is not None
-                        and str(status_res.user_id) != str(user_id)
-                    ):
-                        continue
-                    items.append(status_res)
-        items.sort(key=lambda x: x.created_at, reverse=True)
-        return items
-
-    def get_document_pdf_path(self, document_id: str) -> Path | None:
-        metadata = self.load_metadata(document_id)
-        if metadata and metadata.file_path:
-            candidate = Path(metadata.file_path)
-            if candidate.is_file():
-                return candidate
-        if metadata and metadata.user_id:
-            user_candidate = (
-                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
-            )
-            if user_candidate.is_file():
-                return user_candidate
-        fallback = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
-        if fallback.is_file():
-            return fallback
-        return None
-
-    def get_document_status(self, document_id: str) -> DocumentStatusResponse | None:
-        metadata = self.load_metadata(document_id)
-        if not metadata:
-            return None
-        return DocumentStatusResponse(
-            document_id=metadata.document_id,
-            user_id=metadata.user_id,
-            title=metadata.title,
-            status=metadata.status,
-            file_size_kb=metadata.file_size_kb,
-            total_pages=metadata.total_pages,
-            parsed_pages=len(metadata.pages),
-            error_message=metadata.error_message,
-            created_at=metadata.created_at,
-            updated_at=metadata.updated_at,
-        )
-
-    def get_document_content(
-        self, document_id: str, page_number: int | None = None
-    ) -> DocumentContentResponse | None:
-        metadata = self.load_metadata(document_id)
-        if not metadata:
-            return None
-
-        if page_number is not None:
-            page_file = (
-                self.get_document_dir(document_id) / "pages" / f"page_{page_number}.md"
-            )
-            content = (
-                page_file.read_text(encoding="utf-8") if page_file.is_file() else None
-            )
-        else:
-            full_file = self.get_full_doc_path(document_id)
-            content = (
-                full_file.read_text(encoding="utf-8") if full_file.is_file() else None
-            )
-
-        return DocumentContentResponse(
-            document_id=metadata.document_id,
-            user_id=metadata.user_id,
-            title=metadata.title,
-            status=metadata.status,
-            total_pages=metadata.total_pages,
-            full_content=content,
-            pages=metadata.pages,
-        )
-
     def delete_document(self, document_id: str) -> bool:
-        """Deletes all data associated with a document (uploaded file, parsed directory, DB record and vectors)."""
+        """Deletes all data associated with a document (files, DB record and vectors)."""
         self.mark_task_inactive(document_id)
-        doc_dir = self.parsed_base_dir / document_id
-        metadata = self.load_metadata(document_id)
 
-        pdf_path = None
-        if metadata and metadata.file_path:
-            pdf_path = Path(metadata.file_path)
-        elif metadata and metadata.user_id:
-            candidate = (
-                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
-            )
-            if candidate.exists():
-                pdf_path = candidate
-        else:
-            default_pdf = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
-            if default_pdf.exists():
-                pdf_path = default_pdf
-
-        exists = (pdf_path is not None and pdf_path.exists()) or doc_dir.exists()
-        if not exists:
+        # 1. Delete physical files from disk
+        deleted_files = self.storage.delete_document_files(document_id)
+        if not deleted_files:
             return False
 
-        if pdf_path and pdf_path.exists():
-            try:
-                pdf_path.unlink(missing_ok=True)
-            except Exception as e:
-                logger.warning("Failed to delete PDF file %s: %s", pdf_path, e)
-
-        if metadata and metadata.user_id:
-            user_pdf = (
-                Path(settings.UPLOAD_DIR) / str(metadata.user_id) / f"{document_id}.pdf"
-            )
-            if user_pdf.exists():
-                try:
-                    user_pdf.unlink(missing_ok=True)
-                except Exception as e:
-                    logger.warning("Failed to delete user PDF %s: %s", user_pdf, e)
-
-        default_pdf = Path(settings.UPLOAD_DIR) / f"{document_id}.pdf"
-        if default_pdf.exists():
-            try:
-                default_pdf.unlink(missing_ok=True)
-            except Exception as e:
-                logger.warning(
-                    "Failed to delete default PDF file %s: %s", default_pdf, e
-                )
-
-        if doc_dir.exists():
-            shutil.rmtree(doc_dir, ignore_errors=True)
-
-        # Delete vectors from Qdrant
+        # 2. Delete vectors from Qdrant
         try:
             self.vector_service.delete_document_vectors(document_id)
         except Exception as e:
             logger.warning("Failed to delete vectors for document %s: %s", document_id, e)
 
-        # Asynchronously clean up PostgreSQL record if present
+        # 3. Asynchronously clean up PostgreSQL record if present
         try:
-            import uuid
-
-            from sqlalchemy import delete
-
-            from app.core.database import async_session_maker
-            from app.modules.documents.models import Document
-
             doc_uuid = uuid.UUID(document_id)
 
             async def _cleanup_db():

@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -48,7 +48,7 @@ class ChatSession(Base):
     document: Mapped["Document"] = relationship(
         "Document", back_populates="chat_sessions"
     )
-    messages: Mapped[List["ChatMessage"]] = relationship(
+    messages: Mapped[list["ChatMessage"]] = relationship(
         "ChatMessage",
         back_populates="session",
         cascade="all, delete-orphan",
@@ -72,7 +72,7 @@ class ChatMessage(Base):
     sender: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     socratic_tier: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    citations: Mapped[List[Dict[str, Any]]] = mapped_column(
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         default=list,
         server_default=text("'[]'::jsonb"),
@@ -85,9 +85,7 @@ class ChatMessage(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("idx_chat_messages_session_id", "session_id"),
-    )
+    __table_args__ = (Index("idx_chat_messages_session_id", "session_id"),)
 
     # Relationships
     session: Mapped["ChatSession"] = relationship(
