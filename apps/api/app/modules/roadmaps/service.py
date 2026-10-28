@@ -7,8 +7,13 @@ from pathlib import Path
 from app.core.config import settings
 from app.modules.documents.models import Document
 from app.modules.roadmaps.ai_curriculum_extractor import AICurriculumExtractor
+from app.modules.roadmaps.domain.node_progression_calculator import (
+    NodeProgressionCalculator,
+)
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
+    NodeNotFoundException,
+    RoadmapAccessForbiddenException,
     RoadmapNotFoundException,
     SubjectNotFoundException,
 )
@@ -17,6 +22,7 @@ from app.modules.roadmaps.repository import RoadmapRepository
 from app.modules.roadmaps.roadmap_tree_builder import RoadmapTreeBuilder
 from app.modules.roadmaps.schemas import (
     RoadmapGenerateRequest,
+    RoadmapNodeCompletionResponse,
     RoadmapNodeResponse,
     RoadmapResponse,
     RoadmapTaskStatusResponse,
@@ -30,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 class RoadmapService:
-    """Application Service orchestrating initial Roadmap Tree generation (FR-12 & FR-13)."""
+    """Application Service orchestrating Roadmap Tree generation and Progression (FR-12, FR-13, FR-14)."""
 
     def __init__(
         self,
@@ -38,41 +44,72 @@ class RoadmapService:
         extractor: AICurriculumExtractor | None = None,
         calculator: StudyBlockPacingCalculator | None = None,
         builder: RoadmapTreeBuilder | None = None,
+        progression_calculator: NodeProgressionCalculator | None = None,
     ) -> None:
         self.repo = repository
         self.extractor = extractor or AICurriculumExtractor()
         self.calculator = calculator or StudyBlockPacingCalculator()
         self.builder = builder or RoadmapTreeBuilder()
+        self.progression_calculator = progression_calculator or NodeProgressionCalculator()
         self._task_cache: dict[str, RoadmapTaskStatusResponse] = {}
+
+    async def complete_study_block(
+        self,
+        node_id: uuid.UUID,
+        user_id: uuid.UUID,
+        user_role: str = "user",
+    ) -> RoadmapNodeCompletionResponse:
+        """Completes a leaf study block, cascading completion and unlocking next block (FR-14)."""
+        node = await self.repo.get_node_by_id(node_id)
+        if not node:
+            raise NodeNotFoundException(node_id)
+
+        roadmap = await self.repo.get_roadmap_by_id(node.roadmap_id)
+        if not roadmap:
+            raise RoadmapNotFoundException(node.roadmap_id)
+
+        if roadmap.user_id != user_id and user_role != "admin":
+            raise RoadmapAccessForbiddenException(roadmap.id)
+
+        all_nodes = (
+            list(roadmap.nodes)
+            if roadmap.nodes
+            else await self.repo.get_nodes_by_roadmap_id(roadmap.id)
+        )
+        result = self.progression_calculator.calculate_completion(all_nodes, node_id)
+
+        roadmap.progress_percentage = result.progress_percentage
+        roadmap.status = result.roadmap_status
+        await self.repo.session.flush()
+
+        return RoadmapNodeCompletionResponse(
+            completed_node_id=node_id,
+            unlocked_node_ids=result.unlocked_node_ids,
+            progress_percentage=result.progress_percentage,
+            roadmap_status=result.roadmap_status,
+        )
 
     async def initiate_generation(
         self, user_id: uuid.UUID, req: RoadmapGenerateRequest
     ) -> RoadmapTaskStatusResponse:
         """Validates goal constraints, creates roadmap record, and initializes task state."""
-        # Synchronous validation to fail fast before committing or backgrounding
         today = date.today()
         self.calculator.calculate_available_minutes(
             req.target_date, today, req.available_hours_per_day
         )
 
-        # 1. Validate Subject existence and access control
         subject = await self.repo.get_subject_by_id(req.subject_id)
-        if subject is None:
-            raise SubjectNotFoundException(req.subject_id)
-        if subject.user_id != user_id:
+        if subject is None or subject.user_id != user_id:
             raise SubjectNotFoundException(req.subject_id)
 
-        # 2. Validate Document existence and ensure synchronized in DB
         document = await self.repo.get_document_by_id(req.document_id)
         doc_dir = Path(settings.PARSED_DIR) / str(req.document_id)
         meta_file = doc_dir / "metadata.json"
 
         if document is None:
-            # Check if document was parsed on disk
             if not meta_file.is_file() and not (doc_dir / "pages").exists():
                 raise DocumentNotParsedException(req.document_id)
 
-            # Auto-register document in PostgreSQL so foreign key constraint is satisfied
             total_pages = self._resolve_total_pages(doc_dir)
             file_path = str(Path(settings.UPLOAD_DIR) / f"{req.document_id}.pdf")
             document = Document(

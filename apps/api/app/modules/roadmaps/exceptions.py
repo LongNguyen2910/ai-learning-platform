@@ -47,3 +47,37 @@ class CurriculumExtractionFailedException(RoadmapDomainException):
 
     def __init__(self, reason: str) -> None:
         super().__init__(f"Failed to extract curriculum outline: {reason}")
+
+
+class NodeNotFoundException(RoadmapDomainException):
+    """Raised when a roadmap node cannot be found."""
+
+    def __init__(self, node_id: uuid.UUID | str) -> None:
+        super().__init__(f"RoadmapNode '{node_id}' was not found.")
+        self.node_id = node_id
+
+
+class NodeLockedException(RoadmapDomainException):
+    """Raised when attempting to complete a locked node."""
+
+    def __init__(self, node_id: uuid.UUID | str) -> None:
+        super().__init__(f"RoadmapNode '{node_id}' is locked and cannot be completed.")
+        self.node_id = node_id
+
+
+class NodeNotLeafException(RoadmapDomainException):
+    """Raised when attempting to directly complete a parent chapter or topic."""
+
+    def __init__(self, node_id: uuid.UUID | str) -> None:
+        super().__init__(
+            f"RoadmapNode '{node_id}' is not a leaf study block and cannot be completed directly."
+        )
+        self.node_id = node_id
+
+
+class RoadmapAccessForbiddenException(RoadmapDomainException):
+    """Raised when an unauthorized user attempts to mutate a roadmap node."""
+
+    def __init__(self, roadmap_id: uuid.UUID | str) -> None:
+        super().__init__(f"You do not have access to roadmap '{roadmap_id}'.")
+        self.roadmap_id = roadmap_id

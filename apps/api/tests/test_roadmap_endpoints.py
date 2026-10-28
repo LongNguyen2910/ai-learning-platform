@@ -462,7 +462,9 @@ def test_list_subject_roadmaps_endpoint(client: TestClient, mock_user: User):
         items = response.json()
         assert len(items) == 2
         assert items[0]["id"] == str(rm1.id)
+        assert items[0]["roadmap_id"] == str(rm1.id)
         assert items[1]["id"] == str(rm2.id)
+        assert items[1]["roadmap_id"] == str(rm2.id)
 
 
 def test_list_subject_roadmaps_not_found(client: TestClient):
@@ -531,3 +533,380 @@ def test_generate_roadmap_endpoint_with_session_mode(client: TestClient, mock_us
         mock_pipeline.assert_called_once()
         req_arg = mock_pipeline.call_args[0][2]
         assert req_arg.session_mode.value == "deep_work"
+
+
+def test_complete_node_endpoint_success(client: TestClient, mock_user: User):
+    roadmap_id = uuid.uuid4()
+    node1_id = uuid.uuid4()
+    node2_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    node1 = RoadmapNode(
+        id=node1_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Block 1",
+        order_index=1,
+        estimated_minutes=30,
+        is_unlocked=True,
+        is_completed=False,
+    )
+    node2 = RoadmapNode(
+        id=node2_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=node1.parent_node_id,
+        title="Block 2",
+        order_index=2,
+        estimated_minutes=30,
+        is_unlocked=False,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=node1)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[node1, node2])
+        mock_repo.session.flush = AsyncMock()
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{node1_id}/complete")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["completed_node_id"] == str(node1_id)
+        assert data["unlocked_node_ids"] == [str(node2_id)]
+        assert data["progress_percentage"] == 50.0
+        assert data["roadmap_status"] == "active"
+
+
+def test_complete_node_endpoint_forbidden_for_other_user(
+    client: TestClient, mock_user: User, other_user: User
+):
+    roadmap_id = uuid.uuid4()
+    node1_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=other_user.id,  # Owned by other user
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    node1 = RoadmapNode(
+        id=node1_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Block 1",
+        order_index=1,
+        estimated_minutes=30,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=node1)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{node1_id}/complete")
+        assert resp.status_code == 403
+
+
+def test_complete_node_endpoint_locked_node_bad_request(
+    client: TestClient, mock_user: User
+):
+    roadmap_id = uuid.uuid4()
+    node_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    node = RoadmapNode(
+        id=node_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Locked Block",
+        order_index=2,
+        estimated_minutes=30,
+        is_unlocked=False,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=node)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[node])
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{node_id}/complete")
+        assert resp.status_code == 400
+        assert "locked" in resp.json()["detail"].lower()
+
+
+def test_complete_node_endpoint_not_found(client: TestClient, mock_user: User):
+    nonexistent_id = uuid.uuid4()
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=None)
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{nonexistent_id}/complete")
+        assert resp.status_code == 404
+
+
+def test_complete_node_endpoint_parent_node_bad_request(
+    client: TestClient, mock_user: User
+):
+    roadmap_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    child_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    chapter_node = RoadmapNode(
+        id=parent_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=None,
+        title="Chương 1",
+        order_index=1,
+        estimated_minutes=0,
+        is_unlocked=True,
+        is_completed=False,
+    )
+    leaf_node = RoadmapNode(
+        id=child_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=parent_id,
+        title="Khối 1",
+        order_index=2,
+        estimated_minutes=30,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=chapter_node)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[chapter_node, leaf_node])
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{parent_id}/complete")
+        assert resp.status_code == 400
+        assert "not a leaf study block" in resp.json()["detail"].lower()
+
+
+def test_complete_node_endpoint_final_block_completes_roadmap(
+    client: TestClient, mock_user: User
+):
+    roadmap_id = uuid.uuid4()
+    node_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    leaf_node = RoadmapNode(
+        id=node_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Khối duy nhất",
+        order_index=1,
+        estimated_minutes=45,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=leaf_node)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[leaf_node])
+        mock_repo.session.flush = AsyncMock()
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{node_id}/complete")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["completed_node_id"] == str(node_id)
+        assert data["unlocked_node_ids"] == []
+        assert data["progress_percentage"] == 100.0
+        assert data["roadmap_status"] == "completed"
+
+
+
+
+def test_complete_node_endpoint_idempotent(client: TestClient, mock_user: User):
+    roadmap_id = uuid.uuid4()
+    node_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Roadmap Test",
+        progress_percentage=100.0,
+        status="completed",
+        created_at=datetime.now(UTC),
+    )
+    leaf_node = RoadmapNode(
+        id=node_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Khối đã xong",
+        order_index=1,
+        estimated_minutes=45,
+        is_unlocked=True,
+        is_completed=True,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=leaf_node)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[leaf_node])
+        mock_repo.session.flush = AsyncMock()
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{node_id}/complete")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["completed_node_id"] == str(node_id)
+        assert data["unlocked_node_ids"] == []
+        assert data["progress_percentage"] == 100.0
+        assert data["roadmap_status"] == "completed"
+
+
+def test_complete_node_endpoint_admin_allowed_for_other_user(
+    admin_user: User, other_user: User, mock_db: AsyncMock
+):
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    app.dependency_overrides[get_db] = lambda: mock_db
+
+    roadmap_id = uuid.uuid4()
+    node_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=other_user.id,  # Owned by other user
+        subject_id=uuid.uuid4(),
+        title="Other User Roadmap",
+        progress_percentage=0.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    leaf_node = RoadmapNode(
+        id=node_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=uuid.uuid4(),
+        title="Khối học",
+        order_index=1,
+        estimated_minutes=30,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=leaf_node)
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=[leaf_node])
+        mock_repo.session.flush = AsyncMock()
+
+        with TestClient(app) as test_client:
+            resp = test_client.post(f"/api/v1/roadmaps/nodes/{node_id}/complete")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["completed_node_id"] == str(node_id)
+            assert data["progress_percentage"] == 100.0
+            assert data["roadmap_status"] == "completed"
+
+    app.dependency_overrides.clear()
+
+
+def test_complete_node_endpoint_cross_chapter_unlock(
+    client: TestClient, mock_user: User
+):
+    roadmap_id = uuid.uuid4()
+    ch1_id = uuid.uuid4()
+    top1_id = uuid.uuid4()
+    b1_id = uuid.uuid4()
+    b2_id = uuid.uuid4()
+
+    ch2_id = uuid.uuid4()
+    top2_id = uuid.uuid4()
+    b3_id = uuid.uuid4()
+
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Lộ trình Giải tích",
+        progress_percentage=30.0,
+        status="active",
+        created_at=datetime.now(UTC),
+    )
+    nodes = [
+        RoadmapNode(id=ch1_id, roadmap_id=roadmap_id, parent_node_id=None, title="Chương 1", order_index=1, estimated_minutes=0, is_unlocked=True, is_completed=False),
+        RoadmapNode(id=top1_id, roadmap_id=roadmap_id, parent_node_id=ch1_id, title="Chủ đề 1", order_index=2, estimated_minutes=0, is_unlocked=True, is_completed=False),
+        RoadmapNode(id=b1_id, roadmap_id=roadmap_id, parent_node_id=top1_id, title="Khối 1", order_index=3, estimated_minutes=30, is_unlocked=True, is_completed=True),
+        RoadmapNode(id=b2_id, roadmap_id=roadmap_id, parent_node_id=top1_id, title="Khối 2", order_index=4, estimated_minutes=30, is_unlocked=True, is_completed=False),
+        RoadmapNode(id=ch2_id, roadmap_id=roadmap_id, parent_node_id=None, title="Chương 2", order_index=5, estimated_minutes=0, is_unlocked=True, is_completed=False),
+        RoadmapNode(id=top2_id, roadmap_id=roadmap_id, parent_node_id=ch2_id, title="Chủ đề 2", order_index=6, estimated_minutes=0, is_unlocked=True, is_completed=False),
+        RoadmapNode(id=b3_id, roadmap_id=roadmap_id, parent_node_id=top2_id, title="Khối 3", order_index=7, estimated_minutes=40, is_unlocked=False, is_completed=False),
+    ]
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_node_by_id = AsyncMock(return_value=nodes[3])  # Completing b2_id
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.get_nodes_by_roadmap_id = AsyncMock(return_value=nodes)
+        mock_repo.session.flush = AsyncMock()
+
+        resp = client.post(f"/api/v1/roadmaps/nodes/{b2_id}/complete")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["completed_node_id"] == str(b2_id)
+        # Next leaf in chapter 2 is unlocked
+        assert data["unlocked_node_ids"] == [str(b3_id)]
+        assert data["progress_percentage"] == 60.0
+        assert data["roadmap_status"] == "active"
+        # Chapter 1 and Topic 1 were cascaded
+        assert nodes[0].is_completed is True
+        assert nodes[1].is_completed is True
+        assert nodes[6].is_unlocked is True
+
+
+def test_complete_node_endpoint_unauthenticated(mock_db: AsyncMock):
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_db] = lambda: mock_db
+    with TestClient(app) as unauth_client:
+        resp = unauth_client.post(f"/api/v1/roadmaps/nodes/{uuid.uuid4()}/complete")
+        assert resp.status_code == 401
+    app.dependency_overrides.clear()
+
+
+

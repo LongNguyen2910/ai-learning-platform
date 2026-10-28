@@ -126,3 +126,32 @@ class RoadmapRepository:
             return
         roadmap.status = status
         await self.session.flush()
+
+    async def get_node_by_id(self, node_id: uuid.UUID) -> RoadmapNode | None:
+        """Fetches a single roadmap node by its ID."""
+        query = select(RoadmapNode).where(RoadmapNode.id == node_id)
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def get_nodes_by_roadmap_id(
+        self, roadmap_id: uuid.UUID
+    ) -> list[RoadmapNode]:
+        """Fetches all nodes belonging to a roadmap ordered by order_index."""
+        query = (
+            select(RoadmapNode)
+            .where(RoadmapNode.roadmap_id == roadmap_id)
+            .order_by(RoadmapNode.order_index.asc())
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def update_roadmap_progress(
+        self, roadmap_id: uuid.UUID, progress: float, status: str
+    ) -> None:
+        """Updates roadmap progress percentage and completion status."""
+        roadmap = await self.get_roadmap_by_id(roadmap_id)
+        if roadmap is None:
+            return
+        roadmap.progress_percentage = progress
+        roadmap.status = status
+        await self.session.flush()

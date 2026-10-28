@@ -11,12 +11,17 @@ from app.modules.auth.models import User
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
     InvalidStudyGoalException,
+    NodeLockedException,
+    NodeNotFoundException,
+    NodeNotLeafException,
+    RoadmapAccessForbiddenException,
     RoadmapNotFoundException,
     SubjectNotFoundException,
 )
 from app.modules.roadmaps.repository import RoadmapRepository
 from app.modules.roadmaps.schemas import (
     RoadmapGenerateRequest,
+    RoadmapNodeCompletionResponse,
     RoadmapResponse,
     RoadmapTaskStatusResponse,
     RoadmapTreeResponse,
@@ -176,3 +181,38 @@ async def get_roadmap_details(
             detail="You do not have access to this roadmap.",
         )
     return RoadmapResponse.model_validate(roadmap)
+
+
+@router.post("/nodes/{node_id}/complete", response_model=RoadmapNodeCompletionResponse)
+async def complete_roadmap_node(
+    node_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RoadmapNodeCompletionResponse:
+    """Marks a leaf study block complete, unlocking next block and updating progress (FR-14)."""
+    repo = RoadmapRepository(db)
+    service = RoadmapService(repo)
+
+    try:
+        result = await service.complete_study_block(
+            node_id=node_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        await db.commit()
+        return result
+    except (NodeNotFoundException, RoadmapNotFoundException) as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=err.message
+        ) from err
+    except RoadmapAccessForbiddenException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=err.message
+        ) from err
+    except (NodeLockedException, NodeNotLeafException) as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=err.message
+        ) from err

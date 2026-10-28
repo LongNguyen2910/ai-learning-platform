@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from app.modules.roadmaps.domain.study_session_mode import StudySessionMode
 
@@ -108,6 +108,12 @@ class RoadmapResponse(BaseModel):
     status: str
     created_at: datetime
 
+    @computed_field
+    @property
+    def roadmap_id(self) -> uuid.UUID:
+        """Alias for id so clients can access either id or roadmap_id."""
+        return self.id
+
 
 class RoadmapTreeResponse(BaseModel):
     """Full 3-tier hierarchical tree response for /roadmap endpoint."""
@@ -127,3 +133,14 @@ class RoadmapTaskStatusResponse(BaseModel):
     progress_percent: int
     message: str
     error: str | None = None
+
+
+class RoadmapNodeCompletionResponse(BaseModel):
+    """DTO response returned after completing a study block node (FR-14)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    completed_node_id: uuid.UUID
+    unlocked_node_ids: list[uuid.UUID]
+    progress_percentage: float
+    roadmap_status: str
