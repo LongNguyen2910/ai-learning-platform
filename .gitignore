@@ -41,6 +41,8 @@ dump.rdb
 *.db-journal
 
 # Python & Backend (apps/api)
+apps/api/data/evaluation/.eval_cache.json
+apps/api/data/evaluation/reports/
 __pycache__/
 *.py[cod]
 *$py.class

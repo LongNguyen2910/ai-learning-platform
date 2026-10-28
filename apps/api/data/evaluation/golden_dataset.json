@@ -1,0 +1,43 @@
+[
+  {
+    "user_input": "What is the time complexity of random access in an Array compared to a Linked List?",
+    "reference": "Random access in an Array takes O(1) time because elements are stored at contiguous memory locations. In contrast, accessing an element in a Linked List takes O(n) time because it requires traversing from the head node.",
+    "response": "In an Array, random access has an O(1) time complexity due to contiguous memory allocation. For a Linked List, accessing an element requires sequential traversal starting from the head, which takes O(n) time.",
+    "retrieved_contexts": [
+      "An Array is a collection of elements stored at contiguous memory locations. It provides O(1) random access time complexity via indexing, but insertion and deletion at arbitrary positions require shifting elements, yielding O(n) time complexity.",
+      "A Linked List consists of nodes where each node contains a data field and a reference (pointer) to the next node. Unlike arrays, linked list elements are not stored contiguously in memory. Accessing an element takes O(n) time because it requires traversing from the head."
+    ]
+  },
+  {
+    "user_input": "How does a Hash Table achieve O(1) search complexity on average, and what happens in the worst case?",
+    "reference": "A Hash Table maps keys to values using a hash function, allowing O(1) average-case time complexity for search, insert, and delete. In the worst case, when many collisions occur without proper resizing, operations can degrade to O(n).",
+    "response": "A Hash Table uses a hash function to map keys directly to bucket indices, enabling O(1) average search complexity. However, if multiple keys collide and hash to the same bucket without adequate resizing, search time can degrade to O(n).",
+    "retrieved_contexts": [
+      "A Hash Table implements an associative array abstract data type that maps keys to values using a hash function. In the average case, search, insert, and delete operations take O(1) time. In the worst case (when multiple keys collide and hash to the same bucket without adequate resizing), operations can degrade to O(n)."
+    ]
+  },
+  {
+    "user_input": "What are two common methods used to resolve hash collisions in Hash Tables?",
+    "reference": "The two common methods to resolve hash collisions in Hash Tables are Chaining (using linked lists in each bucket) and Open Addressing (probing).",
+    "response": "Two common collision resolution methods in Hash Tables are Chaining, which uses linked lists in each bucket, and Open Addressing, which utilizes probing techniques.",
+    "retrieved_contexts": [
+      "Collisions are commonly resolved using Chaining (linked lists in each bucket) or Open Addressing (probing)."
+    ]
+  },
+  {
+    "user_input": "What is the ordering property of nodes in a Binary Search Tree (BST)?",
+    "reference": "In a Binary Search Tree (BST), for any given node, all keys in its left subtree are strictly less than its key, and all keys in its right subtree are strictly greater than its key.",
+    "response": "In a Binary Search Tree, every node satisfies the condition that all keys in its left subtree are strictly less than the node's key, while all keys in its right subtree are strictly greater.",
+    "retrieved_contexts": [
+      "A Binary Search Tree is a node-based binary tree data structure where each node has at most two children. For any node, all keys in its left subtree are strictly less than its key, and all keys in its right subtree are strictly greater."
+    ]
+  },
+  {
+    "user_input": "What is the time complexity of searching in a balanced BST versus a degenerate BST?",
+    "reference": "In a balanced BST (such as an AVL or Red-Black tree), search operations take O(log n) time. In an unbalanced degenerate BST (which resembles a linked list), search operations degrade to O(n) time.",
+    "response": "Searching in a balanced BST takes O(log n) time complexity. In an unbalanced degenerate tree resembling a linked list, search degrades to O(n).",
+    "retrieved_contexts": [
+      "In a balanced BST (such as an AVL tree or Red-Black tree), search, insertion, and deletion operations take O(log n) time. In an unbalanced degenerate tree (resembling a linked list), operations degrade to O(n)."
+    ]
+  }
+]
