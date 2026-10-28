@@ -126,10 +126,10 @@ export async function resolveOrCreateDefaultSubject(
   if (matched) return matched
   if (subjects.length > 0) return subjects[0]
 
-  const cleanName = fallbackTitle.trim().slice(0, 140) || "Học phần chung"
+  const cleanName = fallbackTitle.trim().slice(0, 140) || "General Subject"
   return createSubject({
     name: cleanName,
-    description: "Tự động khởi tạo từ trình tạo lộ trình học tập AI",
+    description: "Automatically created by AI Roadmap Generator",
     color_hex: "#0A77FF",
   })
 }
@@ -189,7 +189,7 @@ export async function generateRoadmap(
   if (!response.ok) {
     const err = await response.json().catch(() => null)
     throw new Error(
-      err?.detail || `Không thể khởi tạo lộ trình (${response.status})`
+      err?.detail || `Could not generate roadmap (${response.status})`
     )
   }
 
@@ -208,7 +208,7 @@ export async function fetchRoadmapTaskStatus(
   if (!response.ok) {
     const err = await response.json().catch(() => null)
     throw new Error(
-      err?.detail || `Không thể kiểm tra tiến độ (${response.status})`
+      err?.detail || `Could not check task status (${response.status})`
     )
   }
 
@@ -227,7 +227,7 @@ export async function fetchRoadmapTree(
   if (!response.ok) {
     const err = await response.json().catch(() => null)
     throw new Error(
-      err?.detail || `Không thể tải cấu trúc lộ trình (${response.status})`
+      err?.detail || `Could not load roadmap tree (${response.status})`
     )
   }
 
@@ -242,7 +242,7 @@ export async function deleteRoadmap(roadmapId: string): Promise<void> {
 
   if (!response.ok && response.status !== 204) {
     const err = await response.json().catch(() => null)
-    throw new Error(err?.detail || `Không thể xóa lộ trình (${response.status})`)
+    throw new Error(err?.detail || `Could not delete roadmap (${response.status})`)
   }
 }
 
@@ -254,6 +254,6 @@ export async function deleteSubject(subjectId: string): Promise<void> {
 
   if (!response.ok && response.status !== 204) {
     const err = await response.json().catch(() => null)
-    throw new Error(err?.detail || `Không thể xóa môn học (${response.status})`)
+    throw new Error(err?.detail || `Could not delete subject (${response.status})`)
   }
 }

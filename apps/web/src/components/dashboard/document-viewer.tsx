@@ -328,7 +328,7 @@ export function DocumentViewer({
               <button
                 type="button"
                 onClick={() => onOpenRoadmapGenerator(document)}
-                title="Tạo lộ trình học tập từ giáo trình này"
+                title="Open Roadmap Generator for this subject"
                 className="hidden sm:inline-flex h-8 px-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-[#0A77FF] hover:border-[#0A77FF]/40 hover:bg-[#0A77FF]/5 dark:text-slate-300 dark:hover:text-sky-400 transition-colors cursor-pointer active:scale-[0.98]"
               >
                 <Network className="h-3.5 w-3.5 stroke-[1.8]" />

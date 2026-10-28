@@ -484,19 +484,19 @@ export function DashboardWorkspace() {
             <div className="flex items-end justify-between gap-4">
               <div className="space-y-1">
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-                  Tài liệu học tập
+                  Study Documents
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-                  Tải giáo trình PDF lên và gán vào từng môn học để đọc cùng AI
-                  Tutor hoặc tổng hợp thành lộ trình học tập.
+                  Upload PDF textbooks and assign them to subjects to study with
+                  AI Tutor or synthesize into a unified study roadmap.
                 </p>
               </div>
 
               <button
                 type="button"
                 onClick={() => void handleManualRefresh()}
-                aria-label="Làm mới danh sách tài liệu"
-                title="Làm mới"
+                aria-label="Refresh document list"
+                title="Refresh"
                 className="h-9 px-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 inline-flex items-center gap-2 transition-colors cursor-pointer shrink-0 active:scale-[0.98]"
               >
                 <RefreshCw
@@ -504,7 +504,7 @@ export function DashboardWorkspace() {
                     isLoadingDocs ? "animate-spin" : ""
                   }`}
                 />
-                <span className="hidden sm:inline">Làm mới</span>
+                <span className="hidden sm:inline">Refresh</span>
               </button>
             </div>
 
@@ -521,10 +521,11 @@ export function DashboardWorkspace() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <h2 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                    Thư viện của bạn
+                    Your Library
                   </h2>
                   <span className="text-xs font-mono text-slate-400 dark:text-slate-500 tabular-nums">
-                    {filteredDocuments.length} tài liệu
+                    {filteredDocuments.length}{" "}
+                    {filteredDocuments.length === 1 ? "document" : "documents"}
                   </span>
                 </div>
 
@@ -540,7 +541,7 @@ export function DashboardWorkspace() {
                     >
                       <Network className="h-3.5 w-3.5 stroke-[1.8]" />
                       <span>
-                        Tạo lộ trình môn {selectedFilterSubject.name}
+                        Generate Roadmap for {selectedFilterSubject.name}
                       </span>
                     </button>
                   )}
@@ -552,7 +553,7 @@ export function DashboardWorkspace() {
                       className="h-8 px-3 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-[#0A77FF]/40 hover:text-[#0A77FF] text-xs font-medium text-slate-600 dark:text-slate-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer active:scale-[0.97]"
                     >
                       <Plus className="h-3.5 w-3.5 stroke-[2]" />
-                      <span>Tạo môn học</span>
+                      <span>New Subject</span>
                     </button>
                   ) : (
                     <form
@@ -564,13 +565,13 @@ export function DashboardWorkspace() {
                         autoFocus
                         value={newSubjectName}
                         onChange={(e) => setNewSubjectName(e.target.value)}
-                        placeholder="Tên môn học (VD: Giải tích 1)..."
+                        placeholder="Subject name (e.g. Calculus 1)..."
                         className="h-8 w-44 sm:w-52 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-2.5 text-xs text-slate-900 dark:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
                       />
                       <button
                         type="submit"
                         disabled={isSavingSubject || !newSubjectName.trim()}
-                        aria-label="Lưu môn học"
+                        aria-label="Save subject"
                         className="h-8 px-2.5 rounded-lg bg-[#0A77FF] text-white text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-50 cursor-pointer"
                       >
                         {isSavingSubject ? (
@@ -578,7 +579,7 @@ export function DashboardWorkspace() {
                         ) : (
                           <Check className="h-3.5 w-3.5" />
                         )}
-                        <span>Lưu</span>
+                        <span>Save</span>
                       </button>
                       <button
                         type="button"
@@ -586,7 +587,7 @@ export function DashboardWorkspace() {
                           setIsCreatingSubject(false)
                           setNewSubjectName("")
                         }}
-                        aria-label="Hủy tạo môn học"
+                        aria-label="Cancel creating subject"
                         className="h-8 w-8 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-center text-slate-400 hover:text-slate-700 cursor-pointer"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -602,8 +603,8 @@ export function DashboardWorkspace() {
                   <button
                     type="button"
                     onClick={() => scrollSubjectBarBy(-240)}
-                    aria-label="Cuộn danh sách môn học sang trái"
-                    title="Cuộn sang trái"
+                    aria-label="Scroll subjects left"
+                    title="Scroll left"
                     className="h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 shadow-2xs transition-colors cursor-pointer active:scale-[0.96]"
                   >
                     <ChevronLeft className="h-4 w-4 stroke-[2]" />
@@ -613,7 +614,7 @@ export function DashboardWorkspace() {
                 <div
                   ref={subjectScrollRef}
                   role="tablist"
-                  aria-label="Lọc tài liệu theo môn học"
+                  aria-label="Filter documents by subject"
                   onScroll={updateSubjectScrollButtons}
                   onWheel={handleSubjectBarWheel}
                   onMouseDown={handleSubjectBarMouseDown}
@@ -636,7 +637,7 @@ export function DashboardWorkspace() {
                         : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span>Tất cả</span>
+                    <span>All</span>
                     <span
                       className={`font-mono text-[11px] ${
                         libraryFilter === "all"
@@ -687,8 +688,8 @@ export function DashboardWorkspace() {
                           type="button"
                           disabled={isDeletingSubj}
                           onClick={(e) => void handleDeleteSubject(e, subj.id)}
-                          aria-label={`Xóa môn học ${subj.name}`}
-                          title={`Xóa môn ${subj.name}`}
+                          aria-label={`Delete subject ${subj.name}`}
+                          title={`Delete subject ${subj.name}`}
                           className={`h-5 w-5 rounded flex items-center justify-center transition-colors cursor-pointer ${
                             isActive
                               ? "text-white/75 hover:text-white hover:bg-white/20"
@@ -716,7 +717,7 @@ export function DashboardWorkspace() {
                         : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                     }`}
                   >
-                    <span>Chưa phân loại</span>
+                    <span>Uncategorized</span>
                     <span
                       className={`font-mono text-[11px] ${
                         libraryFilter === "uncategorized"
@@ -733,8 +734,8 @@ export function DashboardWorkspace() {
                   <button
                     type="button"
                     onClick={() => scrollSubjectBarBy(240)}
-                    aria-label="Cuộn danh sách môn học sang phải"
-                    title="Cuộn sang phải"
+                    aria-label="Scroll subjects right"
+                    title="Scroll right"
                     className="h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 shadow-2xs transition-colors cursor-pointer active:scale-[0.96]"
                   >
                     <ChevronRight className="h-4 w-4 stroke-[2]" />

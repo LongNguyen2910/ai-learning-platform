@@ -31,9 +31,9 @@ function formatFileSize(kb?: number): string {
 function formatDate(isoString: string): string {
   try {
     const date = new Date(isoString)
-    return date.toLocaleDateString("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
+    return date.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
       year: "numeric",
     })
   } catch {
@@ -54,7 +54,7 @@ function StatusIndicator({
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400 tabular-nums">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-        <span>Sẵn sàng</span>
+        <span>Ready</span>
       </span>
     )
   }
@@ -63,17 +63,17 @@ function StatusIndicator({
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-600 dark:text-rose-400">
         <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-        <span>Lỗi xử lý</span>
+        <span>Failed</span>
       </span>
     )
   }
 
   const label =
     status === "indexing"
-      ? "Đang lập chỉ mục..."
+      ? "Indexing..."
       : status === "parsing" && totalPages > 0
-      ? `Đang đọc ${parsedPages}/${totalPages} trang`
-      : "Đang xử lý..."
+      ? `Parsing ${parsedPages}/${totalPages} pages`
+      : "Processing..."
 
   return (
     <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#0A77FF] dark:text-sky-400 tabular-nums">
@@ -149,11 +149,11 @@ export function DocumentList({
           <FolderOpen className="h-5 w-5 stroke-[1.75]" />
         </div>
         <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-          Không có tài liệu nào trong danh mục này
+          No documents in this category
         </h3>
         <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-1">
-          Tải tài liệu PDF lên ở khung trên hoặc chọn bộ lọc môn học khác để xem
-          tài liệu.
+          Upload a PDF document above or select a different subject filter to
+          view your study materials.
         </p>
       </div>
     )
@@ -194,7 +194,10 @@ export function DocumentList({
                 </div>
 
                 <div className="flex items-center gap-2 text-xs text-slate-400 dark:text-slate-500 tabular-nums mt-0.5">
-                  <span>{doc.total_pages} trang</span>
+                  <span>
+                    {doc.total_pages}{" "}
+                    {doc.total_pages === 1 ? "page" : "pages"}
+                  </span>
                   <span>·</span>
                   <span>{formatFileSize(doc.file_size_kb)}</span>
                   {doc.created_at && (
@@ -225,13 +228,13 @@ export function DocumentList({
             >
               {/* Inline Subject Assignment Dropdown */}
               <select
-                aria-label={`Chọn môn học cho ${doc.title}`}
+                aria-label={`Assign subject for ${doc.title}`}
                 disabled={isAssigning}
                 value={doc.subject_id || ""}
                 onChange={(e) => void handleSubjectChange(e, doc.document_id)}
                 className="h-7 max-w-[165px] rounded-lg border border-slate-200/80 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950 px-2 text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:border-slate-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] cursor-pointer truncate"
               >
-                <option value="">Chưa phân loại</option>
+                <option value="">Uncategorized</option>
                 {subjects.map((subj) => (
                   <option key={subj.id} value={subj.id}>
                     {subj.name}
@@ -251,8 +254,8 @@ export function DocumentList({
                     type="button"
                     disabled={isBusy}
                     onClick={(e) => void handleRetry(e, doc.document_id)}
-                    aria-label={`Thử lại ${doc.title}`}
-                    title="Thử xử lý lại"
+                    aria-label={`Retry ${doc.title}`}
+                    title="Retry processing"
                     className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-[#0A77FF] hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
                   >
                     <RotateCw
@@ -267,8 +270,8 @@ export function DocumentList({
                   type="button"
                   disabled={isBusy}
                   onClick={(e) => void handleDelete(e, doc.document_id)}
-                  aria-label={`Xóa ${doc.title}`}
-                  title="Xóa tài liệu"
+                  aria-label={`Delete ${doc.title}`}
+                  title="Delete document"
                   className="h-8 w-8 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
                 >
                   {isBusy ? (

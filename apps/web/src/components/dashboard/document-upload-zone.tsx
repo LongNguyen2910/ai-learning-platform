@@ -34,13 +34,13 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
     setSuccessMessage(null)
 
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setErrorMessage("Chỉ hỗ trợ định dạng tệp PDF (.pdf).")
+      setErrorMessage("Only PDF files (.pdf) are supported.")
       return
     }
 
     const sizeMb = file.size / (1024 * 1024)
     if (sizeMb > 50) {
-      setErrorMessage("Dung lượng tệp vượt quá giới hạn tối đa 50 MB.")
+      setErrorMessage("File size exceeds the 50 MB maximum limit.")
       return
     }
 
@@ -50,7 +50,9 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
     try {
       const response = await uploadDocument(file)
       setSuccessMessage(
-        `Đã tải lên "${response.title}" (${response.total_pages} trang)`
+        `Uploaded "${response.title}" (${response.total_pages} ${
+          response.total_pages === 1 ? "page" : "pages"
+        })`
       )
       onUploaded(response, file)
       setTimeout(() => {
@@ -60,7 +62,7 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
       setErrorMessage(
         err instanceof Error
           ? err.message
-          : "Không thể tải tài liệu lên. Vui lòng kiểm tra kết nối API."
+          : "Could not upload document. Please check your API connection."
       )
     } finally {
       setIsUploading(false)
@@ -148,12 +150,12 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
             <div className="space-y-1">
               <p className="text-sm font-semibold text-slate-900 dark:text-white">
                 {isUploading
-                  ? `Đang tải lên ${uploadingFileName}...`
-                  : "Tải tài liệu học tập lên (PDF)"}
+                  ? `Uploading ${uploadingFileName}...`
+                  : "Upload study material (PDF)"}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Kéo thả giáo trình, slide bài giảng hoặc bài tập vào đây, hoặc
-                bấm để chọn tệp (tối đa 50 MB)
+                Drag and drop textbooks, lecture slides, or assignments here, or
+                click to browse (max 50 MB)
               </p>
             </div>
           </div>
@@ -170,12 +172,12 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
             {isUploading ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Đang tải...</span>
+                <span>Uploading...</span>
               </>
             ) : (
               <>
                 <FileUp className="h-3.5 w-3.5 stroke-[2]" />
-                <span>Chọn PDF</span>
+                <span>Choose PDF</span>
               </>
             )}
           </button>

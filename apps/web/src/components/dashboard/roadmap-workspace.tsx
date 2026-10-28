@@ -53,12 +53,12 @@ function getTomorrowDateString(): string {
 }
 
 function formatShortDate(isoDate: string | null): string {
-  if (!isoDate) return "Không giới hạn"
+  if (!isoDate) return "No deadline"
   try {
     const d = new Date(isoDate)
-    return d.toLocaleDateString("vi-VN", {
-      day: "2-digit",
-      month: "2-digit",
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
       year: "numeric",
     })
   } catch {
@@ -86,10 +86,10 @@ function computeChapterMinutes(chapterNode: RoadmapNodeItem): number {
 
 function formatDuration(minutes: number): string {
   if (minutes <= 0) return "—"
-  if (minutes < 60) return `${minutes} phút`
+  if (minutes < 60) return `${minutes} min`
   const hrs = Math.floor(minutes / 60)
   const mins = minutes % 60
-  return mins > 0 ? `${hrs}h ${mins}p` : `${hrs} giờ`
+  return mins > 0 ? `${hrs}h ${mins}m` : `${hrs} hrs`
 }
 
 const HOUR_PRESETS = [1.0, 2.0, 3.0, 4.0]
@@ -153,13 +153,13 @@ export function RoadmapWorkspace({
       setSelectedSubjectId(preselectedSubjectId)
       const subj = subjects.find((s) => s.id === preselectedSubjectId)
       if (subj) {
-        setTitle(`Lộ trình: ${subj.name}`)
+        setTitle(`Roadmap: ${subj.name}`)
       }
       setIsFormExpanded(true)
     } else if (!selectedSubjectId && subjects.length > 0) {
       const firstSubj = subjects[0]
       setSelectedSubjectId(firstSubj.id)
-      setTitle(`Lộ trình: ${firstSubj.name}`)
+      setTitle(`Roadmap: ${firstSubj.name}`)
     }
   }, [preselectedSubjectId, subjects, selectedSubjectId])
 
@@ -228,7 +228,7 @@ export function RoadmapWorkspace({
         setTreeError(
           err instanceof Error
             ? err.message
-            : "Không thể tải chi tiết cây lộ trình."
+            : "Could not load roadmap tree details."
         )
       } finally {
         setIsLoadingTree(false)
@@ -305,8 +305,13 @@ export function RoadmapWorkspace({
     setSelectedSubjectId(subjId)
     setFormError(null)
     const subj = subjects.find((s) => s.id === subjId)
-    if (subj && (!title.trim() || title.startsWith("Lộ trình:"))) {
-      setTitle(`Lộ trình: ${subj.name}`)
+    if (
+      subj &&
+      (!title.trim() ||
+        title.startsWith("Roadmap:") ||
+        title.startsWith("Lộ trình:"))
+    ) {
+      setTitle(`Roadmap: ${subj.name}`)
     }
   }
 
@@ -315,25 +320,25 @@ export function RoadmapWorkspace({
     setFormError(null)
 
     if (!selectedSubjectId) {
-      setFormError("Vui lòng chọn một môn học để tổng hợp lộ trình.")
+      setFormError("Please select a subject to synthesize a roadmap.")
       return
     }
 
     if (readySubjectDocuments.length === 0) {
       setFormError(
-        "Môn học này chưa có tài liệu PDF nào ở trạng thái Sẵn sàng. Vui lòng gán hoặc tải tài liệu lên cho môn học."
+        "This subject has no ready PDF documents yet. Please assign or upload documents for this subject in the Documents tab."
       )
       return
     }
 
     const trimmedTitle = title.trim()
     if (trimmedTitle.length < 2) {
-      setFormError("Tên lộ trình cần tối thiểu 2 ký tự.")
+      setFormError("Roadmap title must be at least 2 characters.")
       return
     }
 
     if (!timeBudgetStats || timeBudgetStats.days <= 0) {
-      setFormError("Ngày hoàn thành mục tiêu phải lớn hơn ngày hôm nay.")
+      setFormError("Target completion date must be in the future.")
       return
     }
 
@@ -357,7 +362,7 @@ export function RoadmapWorkspace({
       setFormError(
         err instanceof Error
           ? err.message
-          : "Đã xảy ra lỗi khi khởi tạo lộ trình."
+          : "An error occurred while generating the roadmap."
       )
     } finally {
       setIsSubmitting(false)
@@ -379,7 +384,7 @@ export function RoadmapWorkspace({
       }
     } catch (err) {
       setFormError(
-        err instanceof Error ? err.message : "Không thể xóa lộ trình."
+        err instanceof Error ? err.message : "Could not delete roadmap."
       )
     } finally {
       setDeletingId(null)
@@ -421,11 +426,11 @@ export function RoadmapWorkspace({
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-slate-200/80 dark:border-slate-800/80 pb-5">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              Lộ trình học tập theo Môn học
+              Subject Study Roadmaps
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
-              Chọn môn học để AI tổng hợp tất cả giáo trình, bài giảng thuộc môn
-              đó thành một lộ trình Chương và Chủ đề thống nhất.
+              Select a subject so AI can synthesize all assigned textbooks and
+              lecture slides into a unified Chapter & Topic study roadmap.
             </p>
           </div>
 
@@ -433,7 +438,7 @@ export function RoadmapWorkspace({
             <button
               type="button"
               onClick={() => void loadRoadmapsList(false)}
-              aria-label="Làm mới danh sách lộ trình"
+              aria-label="Refresh roadmap list"
               className="h-9 px-3 rounded-xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-600 dark:text-slate-300 inline-flex items-center gap-2 transition-colors cursor-pointer active:scale-[0.97]"
             >
               <RefreshCw
@@ -441,7 +446,7 @@ export function RoadmapWorkspace({
                   isLoadingList ? "animate-spin" : ""
                 }`}
               />
-              <span>Làm mới</span>
+              <span>Refresh</span>
             </button>
 
             <button
@@ -450,7 +455,7 @@ export function RoadmapWorkspace({
               className="h-9 px-3.5 rounded-xl bg-[#0A77FF] hover:bg-[#0866DF] text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
             >
               <Plus className="h-3.5 w-3.5 stroke-[2.2]" />
-              <span>Tạo lộ trình mới</span>
+              <span>New Roadmap</span>
             </button>
           </div>
         </div>
@@ -462,7 +467,7 @@ export function RoadmapWorkspace({
             {/* 1. Roadmap Generator Card */}
             {isFormExpanded && (
               <section
-                aria-label="Khởi tạo lộ trình theo môn học"
+                aria-label="Generate roadmap by subject"
                 className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-5 shadow-2xs"
               >
                 <div className="flex items-center justify-between mb-4">
@@ -472,10 +477,11 @@ export function RoadmapWorkspace({
                     </div>
                     <div>
                       <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-                        Tổng hợp lộ trình môn học
+                        Synthesize Subject Roadmap
                       </h2>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Hợp nhất toàn bộ tài liệu PDF thuộc môn học đã chọn
+                        Combine all PDF documents assigned to the selected
+                        subject
                       </p>
                     </div>
                   </div>
@@ -488,14 +494,14 @@ export function RoadmapWorkspace({
                       htmlFor="roadmap-subject-select"
                       className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                     >
-                      Môn học cần tạo lộ trình
+                      Subject
                     </label>
 
                     {subjects.length === 0 ? (
                       <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 p-3.5 text-center space-y-2">
                         <p className="text-xs text-slate-500">
-                          Chưa có môn học nào. Hãy tạo môn học ở trang Tài liệu
-                          trước.
+                          No subjects created yet. Please create a subject in
+                          the Documents tab first.
                         </p>
                         <button
                           type="button"
@@ -503,7 +509,7 @@ export function RoadmapWorkspace({
                           className="h-8 px-3 rounded-lg bg-[#0A77FF]/10 text-[#0A77FF] text-xs font-semibold inline-flex items-center gap-1 cursor-pointer"
                         >
                           <FileText className="h-3.5 w-3.5" />
-                          <span>Sang trang Tài liệu</span>
+                          <span>Go to Documents</span>
                         </button>
                       </div>
                     ) : (
@@ -530,7 +536,7 @@ export function RoadmapWorkspace({
                       htmlFor="roadmap-title-input"
                       className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                     >
-                      Tên lộ trình
+                      Roadmap Title
                     </label>
                     <input
                       id="roadmap-title-input"
@@ -540,7 +546,7 @@ export function RoadmapWorkspace({
                       maxLength={255}
                       value={title}
                       onChange={(e) => setTitle(e.target.value)}
-                      placeholder="Ví dụ: Lộ trình Giải tích 1"
+                      placeholder="e.g. Calculus 1 Study Plan"
                       className="w-full h-9 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 px-3 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
                     />
                   </div>
@@ -552,7 +558,7 @@ export function RoadmapWorkspace({
                         htmlFor="roadmap-target-date"
                         className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                       >
-                        Ngày đích hoàn thành
+                        Target Completion Date
                       </label>
                       <input
                         id="roadmap-target-date"
@@ -570,7 +576,7 @@ export function RoadmapWorkspace({
                         htmlFor="roadmap-hours-input"
                         className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                       >
-                        Thời lượng học / ngày
+                        Study Hours / Day
                       </label>
                       <div className="flex items-center gap-1.5">
                         <input
@@ -616,13 +622,14 @@ export function RoadmapWorkspace({
                     <div className="rounded-lg bg-slate-50 dark:bg-slate-950/90 border border-slate-200/70 dark:border-slate-800 px-3 py-2 flex items-center justify-between text-xs">
                       <span className="text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
                         <Clock className="h-3.5 w-3.5 text-[#0A77FF]" />
-                        <span>Quỹ thời gian khả dụng:</span>
+                        <span>Available time budget:</span>
                       </span>
                       <span className="font-mono font-semibold text-slate-800 dark:text-slate-200 tabular-nums">
-                        {timeBudgetStats.days} ngày ·{" "}
+                        {timeBudgetStats.days}{" "}
+                        {timeBudgetStats.days === 1 ? "day" : "days"} ·{" "}
                         {timeBudgetStats.totalHours}h (
-                        {timeBudgetStats.totalMinutes.toLocaleString("vi-VN")}{" "}
-                        phút)
+                        {timeBudgetStats.totalMinutes.toLocaleString("en-US")}{" "}
+                        min)
                       </span>
                     </div>
                   )}
@@ -633,9 +640,9 @@ export function RoadmapWorkspace({
                       htmlFor="roadmap-goal-input"
                       className="block text-xs font-medium text-slate-700 dark:text-slate-300"
                     >
-                      Mục tiêu trọng tâm{" "}
+                      Focus Goal{" "}
                       <span className="text-slate-400 font-normal">
-                        (Tùy chọn)
+                        (Optional)
                       </span>
                     </label>
                     <textarea
@@ -643,7 +650,7 @@ export function RoadmapWorkspace({
                       rows={2}
                       value={studyGoal}
                       onChange={(e) => setStudyGoal(e.target.value)}
-                      placeholder="Ví dụ: Nắm vững lý thuyết cốt lõi, ưu tiên các dạng bài tập thi cuối kỳ..."
+                      placeholder="e.g. Master core theory, prioritize final exam problem types..."
                       className="w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 p-2.5 text-xs text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] resize-none"
                     />
                   </div>
@@ -668,12 +675,12 @@ export function RoadmapWorkspace({
                     {isSubmitting || activeTask?.status === "processing" ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        <span>Đang tổng hợp lộ trình môn học...</span>
+                        <span>Synthesizing subject roadmap...</span>
                       </>
                     ) : (
                       <>
                         <Sparkles className="h-4 w-4 stroke-[2]" />
-                        <span>Tổng hợp lộ trình</span>
+                        <span>Generate Roadmap</span>
                       </>
                     )}
                   </button>
@@ -683,15 +690,16 @@ export function RoadmapWorkspace({
 
             {/* 2. Saved Roadmaps List */}
             <section
-              aria-label="Danh sách lộ trình đã tạo"
+              aria-label="Saved roadmaps list"
               className="space-y-2.5"
             >
               <div className="flex items-center justify-between px-1">
                 <h2 className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Lộ trình của bạn
+                  Your Roadmaps
                 </h2>
                 <span className="text-xs font-mono text-slate-400 dark:text-slate-500 tabular-nums">
-                  {roadmaps.length} lộ trình
+                  {roadmaps.length}{" "}
+                  {roadmaps.length === 1 ? "roadmap" : "roadmaps"}
                 </span>
               </div>
 
@@ -708,11 +716,11 @@ export function RoadmapWorkspace({
                 <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900/50 p-6 text-center">
                   <Compass className="h-5 w-5 text-slate-400 mx-auto mb-2 stroke-[1.75]" />
                   <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                    Chưa có lộ trình nào được tạo
+                    No roadmaps generated yet
                   </p>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Chọn một môn học ở khung trên để AI tổng hợp lộ trình học
-                    tập.
+                    Select a subject above to synthesize a personalized study
+                    roadmap.
                   </p>
                 </div>
               ) : (
@@ -772,9 +780,9 @@ export function RoadmapWorkspace({
                                 <span>·</span>
                               </>
                             )}
-                            <span>Hạn: {formatShortDate(item.target_date)}</span>
+                            <span>Due: {formatShortDate(item.target_date)}</span>
                             <span>·</span>
-                            <span>{item.available_hours_per_day}h/ngày</span>
+                            <span>{item.available_hours_per_day}h/day</span>
                           </div>
                         </div>
 
@@ -782,8 +790,8 @@ export function RoadmapWorkspace({
                           type="button"
                           disabled={isDeleting}
                           onClick={(e) => void handleDeleteRoadmap(e, item.id)}
-                          aria-label={`Xóa ${item.title}`}
-                          title="Xóa lộ trình"
+                          aria-label={`Delete ${item.title}`}
+                          title="Delete roadmap"
                           className="h-7 w-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer shrink-0"
                         >
                           {isDeleting ? (
@@ -838,7 +846,7 @@ export function RoadmapWorkspace({
 
                 {activeTask.error && (
                   <p className="text-xs text-rose-600 dark:text-rose-400">
-                    Chi tiết lỗi: {activeTask.error}
+                    Error details: {activeTask.error}
                   </p>
                 )}
               </div>
@@ -849,7 +857,7 @@ export function RoadmapWorkspace({
               <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-12 flex flex-col items-center justify-center gap-2.5 text-slate-400">
                 <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF]" />
                 <span className="text-xs font-medium">
-                  Đang tải cấu trúc lộ trình môn học...
+                  Loading roadmap structure...
                 </span>
               </div>
             ) : treeError ? (
@@ -862,12 +870,12 @@ export function RoadmapWorkspace({
                   <Network className="h-5 w-5 stroke-[1.75]" />
                 </div>
                 <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                  Chọn hoặc tổng hợp một lộ trình môn học
+                  Select or generate a subject roadmap
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
-                  Tất cả tài liệu PDF thuộc môn học sẽ được AI hợp nhất thành
-                  cấu trúc Chương và Chủ đề thống nhất kèm liên kết mở đúng tài
-                  liệu và trang tương ứng.
+                  All PDF documents assigned to a subject will be synthesized by
+                  AI into a unified Chapter and Topic outline with direct links
+                  to the exact document and page range.
                 </p>
               </div>
             ) : (
@@ -883,8 +891,10 @@ export function RoadmapWorkspace({
                           </span>
                         )}
                         <span className="text-xs font-mono text-slate-400 tabular-nums">
-                          Tổng hợp từ {Math.max(1, activeTreeDocIds.length)} tài
-                          liệu
+                          Synthesized from {Math.max(1, activeTreeDocIds.length)}{" "}
+                          {Math.max(1, activeTreeDocIds.length) === 1
+                            ? "document"
+                            : "documents"}
                         </span>
                       </div>
                       <h2 className="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
@@ -901,7 +911,7 @@ export function RoadmapWorkspace({
                         className="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 active:scale-[0.97]"
                       >
                         <BookOpen className="h-3.5 w-3.5 text-[#0A77FF]" />
-                        <span>Mở tài liệu chính</span>
+                        <span>Open Primary Document</span>
                       </button>
                     )}
                   </div>
@@ -910,17 +920,19 @@ export function RoadmapWorkspace({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                     <div className="rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 px-3 py-2">
                       <span className="block text-[11px] text-slate-400 dark:text-slate-500">
-                        Cấu trúc chương
+                        Curriculum Structure
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {activeTree.tree.length} chương · {totalTopicsCount} chủ
-                        đề
+                        {activeTree.tree.length}{" "}
+                        {activeTree.tree.length === 1 ? "chapter" : "chapters"}{" "}
+                        · {totalTopicsCount}{" "}
+                        {totalTopicsCount === 1 ? "topic" : "topics"}
                       </span>
                     </div>
 
                     <div className="rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 px-3 py-2">
                       <span className="block text-[11px] text-slate-400 dark:text-slate-500">
-                        Tổng thời lượng
+                        Total Duration
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
                         {formatDuration(activeTree.total_estimated_minutes)}
@@ -929,16 +941,16 @@ export function RoadmapWorkspace({
 
                     <div className="rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 px-3 py-2">
                       <span className="block text-[11px] text-slate-400 dark:text-slate-500">
-                        Cường độ học
+                        Daily Pace
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {activeTree.roadmap.available_hours_per_day} giờ / ngày
+                        {activeTree.roadmap.available_hours_per_day} hrs / day
                       </span>
                     </div>
 
                     <div className="rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 px-3 py-2">
                       <span className="block text-[11px] text-slate-400 dark:text-slate-500">
-                        Hạn hoàn thành
+                        Target Date
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
                         {formatShortDate(activeTree.roadmap.target_date)}
@@ -952,7 +964,7 @@ export function RoadmapWorkspace({
                   <div className="p-10 text-center space-y-2">
                     <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF] mx-auto" />
                     <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                      Lộ trình đang được xây dựng hoặc chưa có dữ liệu chương...
+                      Roadmap is still being generated or has no chapters yet...
                     </p>
                   </div>
                 ) : (
@@ -990,7 +1002,7 @@ export function RoadmapWorkspace({
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="text-xs font-mono font-semibold text-[#0A77FF] dark:text-sky-400 tabular-nums">
-                                    Chương {chapterIdx + 1}
+                                    Chapter {chapterIdx + 1}
                                   </span>
                                   <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                                     {chapter.title}
@@ -1015,12 +1027,15 @@ export function RoadmapWorkspace({
                                   {chapter.target_page_start &&
                                     chapter.target_page_end && (
                                       <span>
-                                        Trang {chapter.target_page_start}–
+                                        Pages {chapter.target_page_start}–
                                         {chapter.target_page_end}
                                       </span>
                                     )}
                                   <span>·</span>
-                                  <span>{topics.length} chủ đề</span>
+                                  <span>
+                                    {topics.length}{" "}
+                                    {topics.length === 1 ? "topic" : "topics"}
+                                  </span>
                                   {chapterMinutes > 0 && (
                                     <>
                                       <span>·</span>
@@ -1044,7 +1059,7 @@ export function RoadmapWorkspace({
                                   className="h-7 px-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 hover:border-[#0A77FF]/40 hover:text-[#0A77FF] text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 tabular-nums"
                                 >
                                   <span>
-                                    Trang {chapter.target_page_start}
+                                    Page {chapter.target_page_start}
                                   </span>
                                   <ArrowUpRight className="h-3 w-3" />
                                 </button>
@@ -1097,7 +1112,7 @@ export function RoadmapWorkspace({
                                         {topic.target_page_start &&
                                           topic.target_page_end && (
                                             <span>
-                                              Trang {topic.target_page_start}–
+                                              Pages {topic.target_page_start}–
                                               {topic.target_page_end}
                                             </span>
                                           )}
@@ -1105,7 +1120,7 @@ export function RoadmapWorkspace({
                                           <>
                                             <span>·</span>
                                             <span>
-                                              Ước tính {topicMinutes} phút
+                                              Est. {topicMinutes} min
                                             </span>
                                           </>
                                         )}
@@ -1124,7 +1139,7 @@ export function RoadmapWorkspace({
                                         className="h-7 px-2.5 rounded-lg bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 active:scale-[0.97] tabular-nums"
                                       >
                                         <span>
-                                          Đọc tr.{topic.target_page_start}
+                                          Read p.{topic.target_page_start}
                                         </span>
                                         <ArrowUpRight className="h-3 w-3" />
                                       </button>
