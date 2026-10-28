@@ -629,32 +629,34 @@ export function AiTutorChatPanel({
       {/* 1. Top Header: Mode Tabs + Session Selector + Close */}
       <div className="h-12 px-3.5 border-b border-slate-200/80 dark:border-slate-800/80 flex items-center justify-between gap-2 shrink-0 bg-slate-50/70 dark:bg-slate-900/50">
         {/* Left: Mode Switcher (AI Chat vs RAG Citation Search) */}
-        <div className="flex items-center gap-1.5 min-w-0">
-          <div className="inline-flex items-center rounded-xl bg-slate-200/70 dark:bg-slate-800/90 p-0.5">
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 overflow-hidden">
+          <div className="inline-flex items-center rounded-xl bg-slate-200/70 dark:bg-slate-800/90 p-0.5 max-w-full min-w-0 overflow-hidden">
             <button
               type="button"
               onClick={() => setPanelMode("chat")}
-              className={`h-7 px-2.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+              title="Gia sư AI"
+              className={`h-7 px-2.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 min-w-0 overflow-hidden transition-all cursor-pointer ${
                 panelMode === "chat"
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              <MessageSquare className="h-3.5 w-3.5 stroke-[2]" />
-              <span>Gia sư AI</span>
+              <MessageSquare className="h-3.5 w-3.5 stroke-[2] shrink-0" />
+              <span className="truncate">Gia sư AI</span>
             </button>
 
             <button
               type="button"
               onClick={() => setPanelMode("search")}
-              className={`h-7 px-2.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+              title="Tra cứu trích dẫn"
+              className={`h-7 px-2.5 rounded-[10px] text-xs font-semibold inline-flex items-center gap-1.5 min-w-0 overflow-hidden transition-all cursor-pointer ${
                 panelMode === "search"
                   ? "bg-white dark:bg-slate-900 text-indigo-600 dark:text-indigo-400 shadow-2xs"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
               }`}
             >
-              <FileSearch className="h-3.5 w-3.5 stroke-[2]" />
-              <span>Tra cứu trích dẫn</span>
+              <FileSearch className="h-3.5 w-3.5 stroke-[2] shrink-0" />
+              <span className="truncate">Tra cứu trích dẫn</span>
             </button>
           </div>
         </div>
@@ -727,9 +729,9 @@ export function AiTutorChatPanel({
                 type="button"
                 onClick={() => void handleCreateNewSession()}
                 title="Bắt đầu hội thoại mới"
-                className="h-7 px-2 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 transition-colors cursor-pointer"
+                className="h-7 px-2 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1 whitespace-nowrap shrink-0 transition-colors cursor-pointer"
               >
-                <Plus className="h-3.5 w-3.5 stroke-[2]" />
+                <Plus className="h-3.5 w-3.5 stroke-[2] shrink-0" />
                 <span className="hidden sm:inline">Mới</span>
               </button>
 
