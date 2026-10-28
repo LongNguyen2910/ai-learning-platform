@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -48,7 +48,7 @@ class Roadmap(Base):
         index=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    target_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    target_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     available_hours_per_day: Mapped[float] = mapped_column(
         Float, default=2.0, nullable=False
     )
@@ -67,7 +67,7 @@ class Roadmap(Base):
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="roadmaps")
     subject: Mapped["Subject"] = relationship("Subject", back_populates="roadmaps")
-    nodes: Mapped[List["RoadmapNode"]] = relationship(
+    nodes: Mapped[list["RoadmapNode"]] = relationship(
         "RoadmapNode", back_populates="roadmap", cascade="all, delete-orphan"
     )
 
@@ -86,23 +86,23 @@ class RoadmapNode(Base):
         ForeignKey("roadmaps.id", ondelete="CASCADE"),
         nullable=False,
     )
-    parent_node_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    parent_node_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("roadmap_nodes.id", ondelete="CASCADE"),
         nullable=True,
     )
-    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id", ondelete="SET NULL"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_page_start: Mapped[Optional[int]] = mapped_column(
+    target_page_start: Mapped[int | None] = mapped_column(
         Integer, nullable=True
     )
-    target_page_end: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    target_page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     estimated_minutes: Mapped[int] = mapped_column(
         Integer, default=30, nullable=False
     )
@@ -112,12 +112,13 @@ class RoadmapNode(Base):
     is_completed: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
-    completed_at: Mapped[Optional[datetime]] = mapped_column(
+    completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
     __table_args__ = (
         Index("idx_roadmap_nodes_roadmap_id", "roadmap_id"),
+        Index("idx_roadmap_nodes_parent_node_id", "parent_node_id"),
     )
 
     # Relationships
@@ -127,7 +128,7 @@ class RoadmapNode(Base):
         remote_side=[id],
         back_populates="child_nodes",
     )
-    child_nodes: Mapped[List["RoadmapNode"]] = relationship(
+    child_nodes: Mapped[list["RoadmapNode"]] = relationship(
         "RoadmapNode",
         back_populates="parent_node",
         cascade="all, delete-orphan",
@@ -135,6 +136,6 @@ class RoadmapNode(Base):
     document: Mapped[Optional["Document"]] = relationship(
         "Document", back_populates="roadmap_nodes"
     )
-    study_sessions: Mapped[List["StudySession"]] = relationship(
+    study_sessions: Mapped[list["StudySession"]] = relationship(
         "StudySession", back_populates="roadmap_node"
     )
