@@ -1,8 +1,17 @@
 "use client"
 
 import * as React from "react"
-import { UploadCloud, FileUp, Loader2, AlertCircle, CheckCircle2 } from "lucide-react"
-import { uploadDocument, type DocumentUploadResponse } from "@/lib/api/documents"
+import {
+  UploadCloud,
+  FileUp,
+  Loader2,
+  AlertCircle,
+  CheckCircle2,
+} from "lucide-react"
+import {
+  uploadDocument,
+  type DocumentUploadResponse,
+} from "@/lib/api/documents"
 
 interface DocumentUploadZoneProps {
   onUploaded: (res: DocumentUploadResponse, file: File) => void
@@ -12,24 +21,26 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const [isDragging, setIsDragging] = React.useState(false)
   const [isUploading, setIsUploading] = React.useState(false)
-  const [uploadingFileName, setUploadingFileName] = React.useState<string | null>(
+  const [uploadingFileName, setUploadingFileName] = React.useState<
+    string | null
+  >(null)
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = React.useState<string | null>(
     null
   )
-  const [errorMessage, setErrorMessage] = React.useState<string | null>(null)
-  const [successMessage, setSuccessMessage] = React.useState<string | null>(null)
 
   const processFile = async (file: File) => {
     setErrorMessage(null)
     setSuccessMessage(null)
 
     if (!file.name.toLowerCase().endsWith(".pdf")) {
-      setErrorMessage("Only PDF files (.pdf) are supported.")
+      setErrorMessage("Chỉ hỗ trợ định dạng tệp PDF (.pdf).")
       return
     }
 
     const sizeMb = file.size / (1024 * 1024)
     if (sizeMb > 50) {
-      setErrorMessage("File exceeds maximum allowed size of 50 MB.")
+      setErrorMessage("Dung lượng tệp vượt quá giới hạn tối đa 50 MB.")
       return
     }
 
@@ -38,7 +49,9 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
 
     try {
       const response = await uploadDocument(file)
-      setSuccessMessage(`Uploaded "${response.title}" (${response.total_pages} pages)`)
+      setSuccessMessage(
+        `Đã tải lên "${response.title}" (${response.total_pages} trang)`
+      )
       onUploaded(response, file)
       setTimeout(() => {
         setSuccessMessage(null)
@@ -47,7 +60,7 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
       setErrorMessage(
         err instanceof Error
           ? err.message
-          : "Could not upload document. Ensure the backend API is running."
+          : "Không thể tải tài liệu lên. Vui lòng kiểm tra kết nối API."
       )
     } finally {
       setIsUploading(false)
@@ -107,7 +120,7 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
           }
         }}
         aria-label="Upload PDF document"
-        className={`group relative rounded-2xl border border-dashed p-6 sm:p-8 transition-all duration-150 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] ${
+        className={`group relative rounded-2xl border border-dashed p-6 sm:p-7 transition-all duration-150 cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] ${
           isDragging
             ? "border-[#0A77FF] bg-[#0A77FF]/[0.04]"
             : "border-slate-300/90 dark:border-slate-800 bg-white dark:bg-slate-900/60 hover:border-[#0A77FF]/60 hover:bg-slate-50/70 dark:hover:bg-slate-900"
@@ -135,11 +148,12 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
             <div className="space-y-1">
               <p className="text-sm font-semibold text-slate-900 dark:text-white">
                 {isUploading
-                  ? `Uploading ${uploadingFileName}...`
-                  : "Upload study document (PDF)"}
+                  ? `Đang tải lên ${uploadingFileName}...`
+                  : "Tải tài liệu học tập lên (PDF)"}
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Drag and drop your textbook or lecture notes here, or click to browse (max 50 MB)
+                Kéo thả giáo trình, slide bài giảng hoặc bài tập vào đây, hoặc
+                bấm để chọn tệp (tối đa 50 MB)
               </p>
             </div>
           </div>
@@ -156,12 +170,12 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
             {isUploading ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                <span>Uploading...</span>
+                <span>Đang tải...</span>
               </>
             ) : (
               <>
                 <FileUp className="h-3.5 w-3.5 stroke-[2]" />
-                <span>Select PDF</span>
+                <span>Chọn PDF</span>
               </>
             )}
           </button>

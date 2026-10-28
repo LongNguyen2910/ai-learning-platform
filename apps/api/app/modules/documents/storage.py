@@ -133,6 +133,7 @@ class DocumentStorage:
         return DocumentStatusResponse(
             document_id=metadata.document_id,
             user_id=metadata.user_id,
+            subject_id=metadata.subject_id,
             title=metadata.title,
             status=metadata.status,
             file_size_kb=metadata.file_size_kb,

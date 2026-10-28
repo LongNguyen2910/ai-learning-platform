@@ -67,6 +67,17 @@ class RoadmapRepository:
         result = await self.session.execute(query)
         return result.scalars().first()
 
+    async def get_documents_by_subject(
+        self, subject_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> list[Document]:
+        """Fetches all documents belonging to a subject."""
+        query = select(Document).where(Document.subject_id == subject_id)
+        if user_id is not None:
+            query = query.where(Document.user_id == user_id)
+        query = query.order_by(Document.created_at.asc())
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def get_roadmaps_by_subject(
         self, subject_id: uuid.UUID, user_id: uuid.UUID | None = None
     ) -> list[Roadmap]:
@@ -77,6 +88,27 @@ class RoadmapRepository:
         query = query.order_by(Roadmap.created_at.desc())
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def get_roadmaps_by_user(
+        self, user_id: uuid.UUID
+    ) -> list[Roadmap]:
+        """Fetches all roadmaps belonging to a user ordered by newest first."""
+        query = (
+            select(Roadmap)
+            .where(Roadmap.user_id == user_id)
+            .order_by(Roadmap.created_at.desc())
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def delete_roadmap(self, roadmap_id: uuid.UUID) -> bool:
+        """Deletes a roadmap and cascades its nodes."""
+        roadmap = await self.get_roadmap_by_id(roadmap_id)
+        if roadmap is None:
+            return False
+        await self.session.delete(roadmap)
+        await self.session.flush()
+        return True
 
     async def persist_tree_nodes(
         self,

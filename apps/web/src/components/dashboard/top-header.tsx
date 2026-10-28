@@ -9,8 +9,10 @@ import {
   ChevronDown,
   FileText,
   ChevronRight,
+  Network,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
+import type { SidebarSection } from "@/components/dashboard/app-sidebar"
 
 interface AuthUser {
   id: string
@@ -20,11 +22,13 @@ interface AuthUser {
 }
 
 interface TopHeaderProps {
+  activeSection?: SidebarSection
   activeDocumentTitle?: string | null
   onBackToDocuments?: () => void
 }
 
 export function TopHeader({
+  activeSection = "documents",
   activeDocumentTitle,
   onBackToDocuments,
 }: TopHeaderProps) {
@@ -133,25 +137,34 @@ export function TopHeader({
     <header className="h-16 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm px-6 flex items-center justify-between shrink-0 z-20">
       {/* Left: Context Breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
-        <button
-          type="button"
-          onClick={() => onBackToDocuments?.()}
-          className={`flex items-center gap-2 text-sm font-medium rounded-lg px-2 py-1 -ml-2 transition-colors ${
-            activeDocumentTitle
-              ? "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-900 cursor-pointer"
-              : "text-slate-900 dark:text-white font-semibold cursor-default"
-          }`}
-        >
-          <FileText className="h-4 w-4 text-[#0A77FF] shrink-0" />
-          <span>My Documents</span>
-        </button>
-
-        {activeDocumentTitle && (
+        {activeSection === "roadmap" ? (
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
+            <Network className="h-4 w-4 text-[#0A77FF] shrink-0" />
+            <span>Roadmap</span>
+          </div>
+        ) : (
           <>
-            <ChevronRight className="h-4 w-4 text-slate-300 dark:text-slate-700 shrink-0" />
-            <span className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[240px] sm:max-w-[420px]">
-              {activeDocumentTitle}
-            </span>
+            <button
+              type="button"
+              onClick={() => onBackToDocuments?.()}
+              className={`flex items-center gap-2 text-sm font-medium rounded-lg px-2 py-1 -ml-2 transition-colors ${
+                activeDocumentTitle
+                  ? "text-slate-500 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-slate-900 cursor-pointer"
+                  : "text-slate-900 dark:text-white font-semibold cursor-default"
+              }`}
+            >
+              <FileText className="h-4 w-4 text-[#0A77FF] shrink-0" />
+              <span>My Documents</span>
+            </button>
+
+            {activeDocumentTitle && (
+              <>
+                <ChevronRight className="h-4 w-4 text-slate-300 dark:text-slate-700 shrink-0" />
+                <span className="text-sm font-semibold text-slate-900 dark:text-white truncate max-w-[240px] sm:max-w-[420px]">
+                  {activeDocumentTitle}
+                </span>
+              </>
+            )}
           </>
         )}
       </div>

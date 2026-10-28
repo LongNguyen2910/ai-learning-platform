@@ -9,6 +9,10 @@ class RawStudyTopic(BaseModel):
 
     title: str = Field(description="Tiêu đề chủ đề hoặc bài học chi tiết")
     description: str | None = Field(default="", description="Tóm tắt nội dung chính")
+    document_id: str | None = Field(
+        default=None,
+        description="UUID của tài liệu nguồn chứa chủ đề này (chọn từ danh sách tài liệu được cung cấp)",
+    )
     target_page_start: int = Field(ge=1, description="Trang bắt đầu trong tài liệu")
     target_page_end: int = Field(ge=1, description="Trang kết thúc trong tài liệu")
     is_core: bool = Field(
@@ -28,6 +32,10 @@ class RawChapterOutline(BaseModel):
 
     title: str = Field(description="Tên chương hoặc module lớn")
     description: str | None = Field(default="", description="Tổng quan chương")
+    document_id: str | None = Field(
+        default=None,
+        description="UUID của tài liệu nguồn chính cho chương này",
+    )
     target_page_start: int = Field(ge=1, description="Trang bắt đầu chương")
     target_page_end: int = Field(ge=1, description="Trang kết thúc chương")
     topics: list[RawStudyTopic] = Field(
@@ -49,7 +57,7 @@ class RoadmapGenerateRequest(BaseModel):
     """DTO for initiating initial roadmap tree generation (FR-12)."""
 
     subject_id: uuid.UUID
-    document_id: uuid.UUID
+    document_id: uuid.UUID | None = None
     title: str = Field(min_length=2, max_length=255)
     target_date: date
     available_hours_per_day: float = Field(default=2.0, ge=0.5, le=12.0)

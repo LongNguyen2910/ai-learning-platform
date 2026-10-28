@@ -17,6 +17,7 @@ export interface ParsedPageMetadata {
 export interface DocumentItem {
   document_id: string
   user_id?: string | null
+  subject_id?: string | null
   title: string
   status: DocumentStatus
   file_size_kb?: number
@@ -32,6 +33,7 @@ export interface DocumentItem {
 export interface DocumentUploadResponse {
   document_id: string
   user_id?: string | null
+  subject_id?: string | null
   title: string
   status: DocumentStatus
   total_pages: number
@@ -118,12 +120,16 @@ export async function fetchDocuments(): Promise<DocumentItem[]> {
 
 export async function uploadDocument(
   file: File,
-  title?: string
+  title?: string,
+  subjectId?: string | null
 ): Promise<DocumentUploadResponse> {
   const formData = new FormData()
   formData.append("file", file)
   if (title && title.trim()) {
     formData.append("title", title.trim())
+  }
+  if (subjectId && subjectId.trim()) {
+    formData.append("subject_id", subjectId.trim())
   }
 
   const response = await fetch(`${getApiBaseUrl()}/documents/upload`, {
@@ -140,6 +146,33 @@ export async function uploadDocument(
       errorData?.message ||
       `Upload failed with status ${response.status}`
     throw new Error(detail)
+  }
+
+  return response.json()
+}
+
+export async function updateDocumentSubject(
+  documentId: string,
+  subjectId: string | null
+): Promise<DocumentItem> {
+  const response = await fetch(
+    `${getApiBaseUrl()}/documents/${encodeURIComponent(documentId)}/subject`,
+    {
+      method: "PATCH",
+      headers: getAuthHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ subject_id: subjectId || null }),
+    }
+  )
+
+  if (!response.ok) {
+    handleUnauthorized(response)
+    const errorData = await response.json().catch(() => null)
+    throw new Error(
+      errorData?.detail || `Could not update subject (${response.status})`
+    )
   }
 
   return response.json()

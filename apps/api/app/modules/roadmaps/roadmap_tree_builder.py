@@ -69,6 +69,16 @@ class RoadmapTreeBuilder:
 
         return nodes
 
+    def _resolve_doc_uuid(
+        self, node_doc_id: str | None, fallback_doc_id: uuid.UUID | None
+    ) -> uuid.UUID | None:
+        if node_doc_id:
+            try:
+                return uuid.UUID(str(node_doc_id))
+            except ValueError:
+                pass
+        return fallback_doc_id
+
     def _create_chapter_node(
         self,
         chapter: PlannedChapterNode,
@@ -77,6 +87,7 @@ class RoadmapTreeBuilder:
         document_id: uuid.UUID | None,
     ) -> UnpersistedNode:
         """Constructs a Level 1 Chapter node."""
+        resolved_doc_id = self._resolve_doc_uuid(chapter.document_id, document_id)
         return UnpersistedNode(
             temp_id=chapter_id,
             parent_temp_id=None,
@@ -87,7 +98,7 @@ class RoadmapTreeBuilder:
             target_page_end=chapter.target_page_end,
             estimated_minutes=0,
             is_unlocked=True,
-            document_id=document_id,
+            document_id=resolved_doc_id,
         )
 
     def _create_topic_node(
@@ -99,6 +110,7 @@ class RoadmapTreeBuilder:
         document_id: uuid.UUID | None,
     ) -> UnpersistedNode:
         """Constructs a Level 2 Topic node."""
+        resolved_doc_id = self._resolve_doc_uuid(topic.document_id, document_id)
         return UnpersistedNode(
             temp_id=topic_id,
             parent_temp_id=parent_id,
@@ -109,7 +121,7 @@ class RoadmapTreeBuilder:
             target_page_end=topic.target_page_end,
             estimated_minutes=0,
             is_unlocked=True,
-            document_id=document_id,
+            document_id=resolved_doc_id,
         )
 
     def _create_block_node(
@@ -121,6 +133,7 @@ class RoadmapTreeBuilder:
         document_id: uuid.UUID | None,
     ) -> UnpersistedNode:
         """Constructs a Level 3 Leaf Study Block node."""
+        resolved_doc_id = self._resolve_doc_uuid(block.document_id, document_id)
         return UnpersistedNode(
             temp_id=uuid.uuid4(),
             parent_temp_id=parent_id,
@@ -131,5 +144,5 @@ class RoadmapTreeBuilder:
             target_page_end=block.target_page_end,
             estimated_minutes=block.estimated_minutes,
             is_unlocked=is_unlocked,
-            document_id=document_id,
+            document_id=resolved_doc_id,
         )

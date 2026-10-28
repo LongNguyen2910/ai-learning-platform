@@ -19,6 +19,7 @@ class ParsedPageMetadata(BaseModel):
 class DocumentMetadata(BaseModel):
     document_id: str
     user_id: str | None = None
+    subject_id: str | None = None
     title: str
     file_path: str
     file_size_kb: int
@@ -33,6 +34,7 @@ class DocumentMetadata(BaseModel):
 class DocumentUploadResponse(BaseModel):
     document_id: str
     user_id: str | None = None
+    subject_id: str | None = None
     title: str
     status: DocumentStatus
     total_pages: int
@@ -42,6 +44,7 @@ class DocumentUploadResponse(BaseModel):
 class DocumentStatusResponse(BaseModel):
     document_id: str
     user_id: str | None = None
+    subject_id: str | None = None
     title: str
     status: DocumentStatus
     file_size_kb: int = 0
@@ -50,6 +53,10 @@ class DocumentStatusResponse(BaseModel):
     error_message: str | None = None
     created_at: str
     updated_at: str
+
+
+class DocumentSubjectUpdateRequest(BaseModel):
+    subject_id: str | None = None
 
 
 class DocumentContentResponse(BaseModel):

@@ -32,6 +32,7 @@ from app.modules.documents.schemas import (
     DocumentMetadata,
     DocumentRetryResponse,
     DocumentStatusResponse,
+    DocumentSubjectUpdateRequest,
     DocumentUploadResponse,
 )
 from app.modules.documents.service import ingestion_service
@@ -76,10 +77,17 @@ async def list_documents(
                     d.error_message = meta.error_message
                     dirty = True
 
+                effective_subject_id = (
+                    str(d.subject_id)
+                    if d.subject_id
+                    else (meta.subject_id if meta else None)
+                )
+
                 items.append(
                     DocumentStatusResponse(
                         document_id=doc_str,
                         user_id=str(d.user_id),
+                        subject_id=effective_subject_id,
                         title=d.title,
                         status=effective_status,
                         file_size_kb=d.file_size_kb,
@@ -111,6 +119,7 @@ async def upload_document(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF document file"),
     title: str | None = Form(None, description="Optional document display title"),
+    subject_id: str | None = Form(None, description="Optional Subject UUID"),
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -160,12 +169,20 @@ async def upload_document(
             detail=f"Invalid or corrupted PDF file: {exc}",
         )
 
+    parsed_subject_uuid: uuid.UUID | None = None
+    if subject_id and subject_id.strip():
+        try:
+            parsed_subject_uuid = uuid.UUID(subject_id.strip())
+        except ValueError:
+            parsed_subject_uuid = None
+
     # Save to PostgreSQL Document table if DB and current_user are present
     if db is not None and current_user is not None:
         try:
             doc_record = Document(
                 id=uuid.UUID(document_id),
                 user_id=current_user.id,
+                subject_id=parsed_subject_uuid,
                 title=doc_title,
                 file_path=str(destination),
                 file_type="pdf",
@@ -182,6 +199,7 @@ async def upload_document(
     initial_metadata = DocumentMetadata(
         document_id=document_id,
         user_id=str(current_user.id) if current_user else None,
+        subject_id=str(parsed_subject_uuid) if parsed_subject_uuid else None,
         title=doc_title,
         file_path=str(destination),
         file_size_kb=max(1, int(file_size_bytes / 1024)),
@@ -203,6 +221,7 @@ async def upload_document(
     return DocumentUploadResponse(
         document_id=document_id,
         user_id=str(current_user.id) if current_user else None,
+        subject_id=str(parsed_subject_uuid) if parsed_subject_uuid else None,
         title=doc_title,
         status="uploading",
         total_pages=total_pages,
@@ -280,6 +299,62 @@ async def get_document_content(
             detail=f"Document '{document_id}' not found.",
         )
     return res
+
+
+@router.patch(
+    "/{document_id}/subject",
+    response_model=DocumentStatusResponse,
+    summary="Assign or unassign a document to a Subject",
+)
+async def update_document_subject(
+    document_id: str,
+    req: DocumentSubjectUpdateRequest,
+    doc: Annotated[Document, Depends(get_valid_user_document)],
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+):
+    parsed_subject_uuid: uuid.UUID | None = None
+    if req.subject_id and req.subject_id.strip():
+        try:
+            parsed_subject_uuid = uuid.UUID(req.subject_id.strip())
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid subject_id UUID.",
+            ) from err
+
+    meta = ingestion_service.load_metadata(document_id)
+    if meta is not None:
+        meta.subject_id = str(parsed_subject_uuid) if parsed_subject_uuid else None
+        ingestion_service.save_metadata(meta)
+
+    if db is not None:
+        try:
+            stmt = select(Document).where(Document.id == doc.id)
+            db_doc = await db.scalar(stmt)
+            if db_doc is not None:
+                db_doc.subject_id = parsed_subject_uuid
+                await db.commit()
+        except Exception as exc:
+            logger.warning("Could not update Document subject_id in DB: %s", exc)
+
+    res = ingestion_service.get_document_status(document_id)
+    if res:
+        res.subject_id = str(parsed_subject_uuid) if parsed_subject_uuid else None
+        return res
+
+    return DocumentStatusResponse(
+        document_id=document_id,
+        user_id=str(doc.user_id),
+        subject_id=str(parsed_subject_uuid) if parsed_subject_uuid else None,
+        title=doc.title,
+        status=doc.status,
+        file_size_kb=doc.file_size_kb,
+        total_pages=doc.total_pages,
+        parsed_pages=ingestion_service.count_parsed_pages(document_id),
+        error_message=doc.error_message,
+        created_at=doc.created_at.isoformat() if doc.created_at else "",
+        updated_at="",
+    )
 
 
 @router.delete(

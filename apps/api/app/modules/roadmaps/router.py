@@ -133,6 +133,40 @@ async def get_roadmap_tree_structure(
         ) from exc
 
 
+@router.get("", response_model=list[RoadmapResponse])
+async def list_user_roadmaps(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[RoadmapResponse]:
+    """Lists all roadmaps belonging to the current user."""
+    repo = RoadmapRepository(db)
+    roadmaps = await repo.get_roadmaps_by_user(current_user.id)
+    return [RoadmapResponse.model_validate(r) for r in roadmaps]
+
+
+@router.delete("/{roadmap_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_user_roadmap(
+    roadmap_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Deletes a roadmap belonging to the current user."""
+    repo = RoadmapRepository(db)
+    roadmap = await repo.get_roadmap_by_id(roadmap_id)
+    if not roadmap:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Roadmap '{roadmap_id}' was not found.",
+        )
+    if roadmap.user_id != current_user.id and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this roadmap.",
+        )
+    await repo.delete_roadmap(roadmap_id)
+    await db.commit()
+
+
 @router.get("/subject/{subject_id}", response_model=list[RoadmapResponse])
 async def list_subject_roadmaps(
     subject_id: uuid.UUID,

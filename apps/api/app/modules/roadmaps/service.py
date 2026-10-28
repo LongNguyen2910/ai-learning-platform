@@ -6,7 +6,10 @@ from pathlib import Path
 
 from app.core.config import settings
 from app.modules.documents.models import Document
-from app.modules.roadmaps.ai_curriculum_extractor import AICurriculumExtractor
+from app.modules.roadmaps.ai_curriculum_extractor import (
+    AICurriculumExtractor,
+    SourceDocumentInput,
+)
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
     RoadmapNotFoundException,
@@ -45,11 +48,134 @@ class RoadmapService:
         self.builder = builder or RoadmapTreeBuilder()
         self._task_cache: dict[str, RoadmapTaskStatusResponse] = {}
 
+    async def _resolve_subject_source_documents(
+        self,
+        user_id: uuid.UUID,
+        subject_id: uuid.UUID,
+        explicit_document_id: uuid.UUID | None,
+        fallback_title: str,
+    ) -> list[SourceDocumentInput]:
+        """Resolves one or all parsed documents belonging to the subject."""
+        if explicit_document_id is not None:
+            document = await self.repo.get_document_by_id(explicit_document_id)
+            doc_dir = Path(settings.PARSED_DIR) / str(explicit_document_id)
+            meta_file = doc_dir / "metadata.json"
+
+            if document is None:
+                if not meta_file.is_file() and not (doc_dir / "pages").exists():
+                    raise DocumentNotParsedException(explicit_document_id)
+
+                total_pages = self._resolve_total_pages(doc_dir)
+                file_path = str(
+                    Path(settings.UPLOAD_DIR) / f"{explicit_document_id}.pdf"
+                )
+                document = Document(
+                    id=explicit_document_id,
+                    user_id=user_id,
+                    subject_id=subject_id,
+                    title=fallback_title,
+                    file_path=file_path,
+                    file_type="pdf",
+                    file_size_kb=0,
+                    total_pages=total_pages,
+                    status="ready",
+                )
+                self.repo.session.add(document)
+                await self.repo.session.flush()
+
+            total_pages = self._resolve_total_pages(doc_dir)
+            return [
+                SourceDocumentInput(
+                    document_id=str(explicit_document_id),
+                    title=document.title,
+                    total_pages=total_pages,
+                    doc_dir=doc_dir,
+                )
+            ]
+
+        # Multi-document Subject mode: gather all documents assigned to subject_id
+        db_docs = await self.repo.get_documents_by_subject(
+            subject_id, user_id=user_id
+        )
+        source_map: dict[str, SourceDocumentInput] = {}
+
+        for d in db_docs:
+            doc_str = str(d.id)
+            doc_dir = Path(settings.PARSED_DIR) / doc_str
+            if (doc_dir / "metadata.json").is_file() or (
+                doc_dir / "pages"
+            ).exists():
+                source_map[doc_str] = SourceDocumentInput(
+                    document_id=doc_str,
+                    title=d.title,
+                    total_pages=self._resolve_total_pages(doc_dir),
+                    doc_dir=doc_dir,
+                )
+
+        # Also check disk metadata.json in case a document was assigned via metadata
+        parsed_root = Path(settings.PARSED_DIR)
+        if parsed_root.exists():
+            for entry in parsed_root.iterdir():
+                if not entry.is_dir() or entry.name in source_map:
+                    continue
+                meta_file = entry / "metadata.json"
+                if not meta_file.is_file():
+                    continue
+                try:
+                    with open(meta_file, "r", encoding="utf-8") as f:
+                        meta = json.load(f)
+                    if str(meta.get("subject_id") or "") != str(subject_id):
+                        continue
+                    if (
+                        meta.get("user_id")
+                        and str(meta.get("user_id")) != str(user_id)
+                    ):
+                        continue
+                    doc_uuid = uuid.UUID(entry.name)
+                    total_pages = self._resolve_total_pages(entry)
+                    title = str(meta.get("title") or fallback_title)
+
+                    existing_db = await self.repo.get_document_by_id(doc_uuid)
+                    if existing_db is None:
+                        file_path = str(
+                            meta.get("file_path")
+                            or (Path(settings.UPLOAD_DIR) / f"{entry.name}.pdf")
+                        )
+                        new_doc = Document(
+                            id=doc_uuid,
+                            user_id=user_id,
+                            subject_id=subject_id,
+                            title=title,
+                            file_path=file_path,
+                            file_type="pdf",
+                            file_size_kb=int(meta.get("file_size_kb") or 0),
+                            total_pages=total_pages,
+                            status=str(meta.get("status") or "ready"),
+                        )
+                        self.repo.session.add(new_doc)
+                        await self.repo.session.flush()
+
+                    source_map[entry.name] = SourceDocumentInput(
+                        document_id=entry.name,
+                        title=title,
+                        total_pages=total_pages,
+                        doc_dir=entry,
+                    )
+                except Exception as err:
+                    logger.debug(
+                        "Skipping disk metadata entry %s: %s", entry.name, err
+                    )
+
+        sources = list(source_map.values())
+        if not sources:
+            raise DocumentNotParsedException(subject_id)
+
+        return sources
+
     async def initiate_generation(
         self, user_id: uuid.UUID, req: RoadmapGenerateRequest
     ) -> RoadmapTaskStatusResponse:
         """Validates goal constraints, creates roadmap record, and initializes task state."""
-        # Synchronous validation to fail fast before committing or backgrounding
         today = date.today()
         self.calculator.calculate_available_minutes(
             req.target_date, today, req.available_hours_per_day
@@ -62,32 +188,13 @@ class RoadmapService:
         if subject.user_id != user_id:
             raise SubjectNotFoundException(req.subject_id)
 
-        # 2. Validate Document existence and ensure synchronized in DB
-        document = await self.repo.get_document_by_id(req.document_id)
-        doc_dir = Path(settings.PARSED_DIR) / str(req.document_id)
-        meta_file = doc_dir / "metadata.json"
-
-        if document is None:
-            # Check if document was parsed on disk
-            if not meta_file.is_file() and not (doc_dir / "pages").exists():
-                raise DocumentNotParsedException(req.document_id)
-
-            # Auto-register document in PostgreSQL so foreign key constraint is satisfied
-            total_pages = self._resolve_total_pages(doc_dir)
-            file_path = str(Path(settings.UPLOAD_DIR) / f"{req.document_id}.pdf")
-            document = Document(
-                id=req.document_id,
-                user_id=user_id,
-                subject_id=req.subject_id,
-                title=req.title,
-                file_path=file_path,
-                file_type="pdf",
-                file_size_kb=0,
-                total_pages=total_pages,
-                status="ready",
-            )
-            self.repo.session.add(document)
-            await self.repo.session.flush()
+        # 2. Validate that at least 1 parsed document exists for this subject (or explicit document_id)
+        sources = await self._resolve_subject_source_documents(
+            user_id=user_id,
+            subject_id=req.subject_id,
+            explicit_document_id=req.document_id,
+            fallback_title=req.title,
+        )
 
         roadmap = await self.repo.create_roadmap(
             user_id=user_id,
@@ -102,7 +209,7 @@ class RoadmapService:
             roadmap_id=roadmap.id,
             status="processing",
             progress_percent=10,
-            message="Đã khởi tạo tiến trình sinh cây lộ trình",
+            message=f"Đã khởi tạo tiến trình tổng hợp {len(sources)} tài liệu của môn học",
         )
         self._task_cache[task_id] = status_response
         return status_response
@@ -115,18 +222,40 @@ class RoadmapService:
     ) -> None:
         """Executes the complete AI extraction and pacing allocation pipeline."""
         try:
-            self._update_task(task_id, 25, "Đang trích xuất nội dung giáo trình...")
-            doc_dir = Path(settings.PARSED_DIR) / str(req.document_id)
-            total_pages = self._resolve_total_pages(doc_dir)
+            roadmap = await self.repo.get_roadmap_by_id(roadmap_id)
+            user_id = roadmap.user_id if roadmap else uuid.uuid4()
 
-            curriculum = await self.extractor.extract_outline(
-                doc_dir=doc_dir,
-                total_pages=total_pages,
-                title=req.title,
-                study_goal=req.study_goal,
+            sources = await self._resolve_subject_source_documents(
+                user_id=user_id,
+                subject_id=req.subject_id,
+                explicit_document_id=req.document_id,
+                fallback_title=req.title,
             )
 
-            self._update_task(task_id, 60, "Đang tính toán phân bổ khối học Pomodoro...")
+            self._update_task(
+                task_id,
+                25,
+                f"Đang trích xuất & hợp nhất nội dung từ {len(sources)} tài liệu...",
+            )
+
+            if len(sources) == 1 and req.document_id is not None:
+                # Preserve exact call signature for unit tests mocking extract_outline
+                curriculum = await self.extractor.extract_outline(
+                    doc_dir=sources[0].doc_dir,
+                    total_pages=sources[0].total_pages,
+                    title=req.title,
+                    study_goal=req.study_goal,
+                )
+            else:
+                curriculum = await self.extractor.extract_multi_document_outline(
+                    documents=sources,
+                    roadmap_title=req.title,
+                    study_goal=req.study_goal,
+                )
+
+            self._update_task(
+                task_id, 60, "Đang tính toán phân bổ khối học Pomodoro..."
+            )
             today = date.today()
             planned_chapters = self.calculator.allocate(
                 curriculum=curriculum,
@@ -136,15 +265,23 @@ class RoadmapService:
             )
 
             self._update_task(task_id, 80, "Đang dựng cấu trúc cây 3 tầng...")
+            fallback_doc_uuid = (
+                req.document_id
+                if req.document_id is not None
+                else uuid.UUID(sources[0].document_id)
+            )
             unpersisted_nodes = self.builder.build_tree_nodes(
-                planned_chapters=planned_chapters, document_id=req.document_id
+                planned_chapters=planned_chapters,
+                document_id=fallback_doc_uuid,
             )
 
             await self.repo.persist_tree_nodes(roadmap_id, unpersisted_nodes)
             await self.repo.update_status(roadmap_id, "active")
             await self.repo.session.commit()
 
-            self._update_task(task_id, 100, "Sinh lộ trình thành công", status="completed")
+            self._update_task(
+                task_id, 100, "Sinh lộ trình thành công", status="completed"
+            )
         except Exception as exc:
             logger.error("Roadmap generation failed for task %s: %s", task_id, exc)
             try:
@@ -153,7 +290,13 @@ class RoadmapService:
                 await self.repo.session.commit()
             except Exception as rollback_err:
                 logger.error("Failed to update status to failed: %s", rollback_err)
-            self._update_task(task_id, 100, "Thất bại khi sinh lộ trình", status="failed", err=str(exc))
+            self._update_task(
+                task_id,
+                100,
+                "Thất bại khi sinh lộ trình",
+                status="failed",
+                err=str(exc),
+            )
 
     async def get_roadmap_tree(self, roadmap_id: uuid.UUID) -> RoadmapTreeResponse:
         """Retrieves and transforms flat nodes into a nested 3-tier hierarchical tree."""
@@ -176,7 +319,12 @@ class RoadmapService:
         return self._task_cache.get(task_id)
 
     def _update_task(
-        self, task_id: str, percent: int, msg: str, status: str = "processing", err: str | None = None
+        self,
+        task_id: str,
+        percent: int,
+        msg: str,
+        status: str = "processing",
+        err: str | None = None,
     ) -> None:
         """Internal helper to update task progress."""
         current = self._task_cache.get(task_id)
@@ -208,7 +356,9 @@ class RoadmapService:
 
         return 1
 
-    def _build_nested_tree(self, nodes: list[RoadmapNode]) -> list[RoadmapNodeResponse]:
+    def _build_nested_tree(
+        self, nodes: list[RoadmapNode]
+    ) -> list[RoadmapNodeResponse]:
         """Builds 3-tier hierarchy: Level 1 (Chapters) -> Level 2 (Topics) -> Level 3 (Blocks)."""
         node_map: dict[uuid.UUID, RoadmapNodeResponse] = {}
         roots: list[RoadmapNodeResponse] = []

@@ -2,7 +2,6 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
 import {
   Sparkles,
   FileText,
@@ -14,9 +13,11 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
+export type SidebarSection = "documents" | "roadmap"
+
 interface NavItem {
+  id: SidebarSection | "flashcards" | "quizzes"
   label: string
-  href: string
   icon: React.ComponentType<{ className?: string }>
   badge?: string
   disabled?: boolean
@@ -24,27 +25,25 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   {
+    id: "documents",
     label: "Documents",
-    href: "/dashboard",
     icon: FileText,
   },
   {
+    id: "roadmap",
     label: "Roadmap",
-    href: "#roadmap",
     icon: Network,
-    badge: "Soon",
-    disabled: true,
   },
   {
+    id: "flashcards",
     label: "Flashcards",
-    href: "#flashcards",
     icon: Layers,
     badge: "Soon",
     disabled: true,
   },
   {
+    id: "quizzes",
     label: "Quizzes",
-    href: "#quizzes",
     icon: Target,
     badge: "Soon",
     disabled: true,
@@ -53,17 +52,19 @@ const NAV_ITEMS: NavItem[] = [
 
 interface AppSidebarProps {
   collapsed: boolean
+  activeSection?: SidebarSection
   onToggleCollapse: () => void
+  onSelectSection?: (section: SidebarSection) => void
   onSelectDocumentsRoot?: () => void
 }
 
 export function AppSidebar({
   collapsed,
+  activeSection = "documents",
   onToggleCollapse,
+  onSelectSection,
   onSelectDocumentsRoot,
 }: AppSidebarProps) {
-  const pathname = usePathname()
-
   return (
     <aside
       aria-label="Primary Sidebar Navigation"
@@ -81,11 +82,13 @@ export function AppSidebar({
       >
         <Link
           href="/dashboard"
-          onClick={() => onSelectDocumentsRoot?.()}
+          onClick={() => {
+            onSelectSection?.("documents")
+            onSelectDocumentsRoot?.()
+          }}
           className="flex items-center gap-3 min-w-0 group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] rounded-lg"
           title="AI LEARNING PLATFORM"
         >
-          {/* App Emblem (matching AuthBrandPanel) */}
           <div className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700 flex items-center justify-center text-white shadow-[0_2px_10px_rgba(10,119,255,0.3)] ring-1 ring-white/20">
             <Sparkles className="h-4 w-4 stroke-[2]" />
           </div>
@@ -106,21 +109,19 @@ export function AppSidebar({
       {/* Navigation Links */}
       <nav className="flex-1 py-4 px-3 space-y-1.5 overflow-y-auto">
         {!collapsed && (
-          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+          <div className="px-3 pb-2 text-xs font-semibold text-slate-400 dark:text-slate-500">
             Study Menu
           </div>
         )}
 
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon
-          const isActive =
-            !item.disabled &&
-            (pathname === item.href || pathname.startsWith(`${item.href}/`))
+          const isActive = !item.disabled && activeSection === item.id
 
           if (item.disabled) {
             return (
               <div
-                key={item.label}
+                key={item.id}
                 title={`${item.label} (Coming soon)`}
                 aria-disabled="true"
                 className={cn(
@@ -144,13 +145,20 @@ export function AppSidebar({
           }
 
           return (
-            <Link
-              key={item.label}
-              href={item.href}
-              onClick={() => onSelectDocumentsRoot?.()}
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => {
+                if (item.id === "documents") {
+                  onSelectSection?.("documents")
+                  onSelectDocumentsRoot?.()
+                } else if (item.id === "roadmap") {
+                  onSelectSection?.("roadmap")
+                }
+              }}
               title={collapsed ? item.label : undefined}
               className={cn(
-                "flex items-center rounded-xl text-[15px] font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
+                "w-full flex items-center rounded-xl text-[15px] font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
                 collapsed
                   ? "h-11 w-11 mx-auto justify-center"
                   : "h-11 px-3.5 justify-between",
@@ -173,7 +181,7 @@ export function AppSidebar({
               {!collapsed && isActive && (
                 <span className="h-2 w-2 rounded-full bg-[#0A77FF] dark:bg-sky-400" />
               )}
-            </Link>
+            </button>
           )
         })}
       </nav>

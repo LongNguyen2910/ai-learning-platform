@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Sparkles,
   GripVertical,
+  Network,
 } from "lucide-react"
 import {
   fetchDocumentContent,
@@ -41,8 +42,10 @@ const PdfCanvasViewer = dynamic(
 
 interface DocumentViewerProps {
   document: DocumentItem
+  initialPageJump?: { page: number; nonce: number } | null
   onBack: () => void
   onCacheBlobUrl?: (documentId: string, blobUrl: string) => void
+  onOpenRoadmapGenerator?: (doc: DocumentItem) => void
 }
 
 type ReaderTab = "pdf" | "markdown"
@@ -53,8 +56,10 @@ const DEFAULT_SPLIT_PERCENT = 52
 
 export function DocumentViewer({
   document,
+  initialPageJump,
   onBack,
   onCacheBlobUrl,
+  onOpenRoadmapGenerator,
 }: DocumentViewerProps) {
   const [activeTab, setActiveTab] = React.useState<ReaderTab>("pdf")
   const [isSplitChatOpen, setIsSplitChatOpen] = React.useState(false)
@@ -92,6 +97,17 @@ export function DocumentViewer({
     },
     []
   )
+
+  // Jump to requested page when navigating from a Roadmap node
+  React.useEffect(() => {
+    if (!initialPageJump || initialPageJump.page < 1) return
+    setActiveTab("pdf")
+    setCurrentPage(initialPageJump.page)
+    setHighlightedPage({
+      page: initialPageJump.page,
+      nonce: initialPageJump.nonce,
+    })
+  }, [initialPageJump])
 
   // Reset reader state only when switching to a different document ID
   React.useEffect(() => {
@@ -306,6 +322,19 @@ export function DocumentViewer({
               <ExternalLink className="h-3.5 w-3.5 stroke-[1.8]" />
             </a>
           )}
+
+          {onOpenRoadmapGenerator &&
+            (document.status === "ready" || document.status === "parsed") && (
+              <button
+                type="button"
+                onClick={() => onOpenRoadmapGenerator(document)}
+                title="Tạo lộ trình học tập từ giáo trình này"
+                className="hidden sm:inline-flex h-8 px-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-[#0A77FF] hover:border-[#0A77FF]/40 hover:bg-[#0A77FF]/5 dark:text-slate-300 dark:hover:text-sky-400 transition-colors cursor-pointer active:scale-[0.98]"
+              >
+                <Network className="h-3.5 w-3.5 stroke-[1.8]" />
+                <span>Roadmap</span>
+              </button>
+            )}
 
           {/* Primary Split-View AI Tutor Toggle Button */}
           <button

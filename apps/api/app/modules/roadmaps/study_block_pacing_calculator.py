@@ -21,6 +21,7 @@ class AllocatedStudyBlock:
     target_page_end: int
     estimated_minutes: int
     is_core: bool = True
+    document_id: str | None = None
 
 
 @dataclass
@@ -32,6 +33,7 @@ class PlannedTopicNode:
     target_page_start: int
     target_page_end: int
     is_core: bool
+    document_id: str | None = None
     blocks: list[AllocatedStudyBlock] = field(default_factory=list)
 
 
@@ -43,6 +45,7 @@ class PlannedChapterNode:
     description: str
     target_page_start: int
     target_page_end: int
+    document_id: str | None = None
     topics: list[PlannedTopicNode] = field(default_factory=list)
 
 
@@ -93,7 +96,9 @@ class StudyBlockPacingCalculator:
             if not allow_secondary and not topic.is_core:
                 continue
 
-            blocks = self._slice_into_study_blocks(topic)
+            blocks = self._slice_into_study_blocks(
+                topic, fallback_doc_id=chapter.document_id
+            )
             planned_topics.append(
                 PlannedTopicNode(
                     title=topic.title,
@@ -101,6 +106,7 @@ class StudyBlockPacingCalculator:
                     target_page_start=topic.target_page_start,
                     target_page_end=topic.target_page_end,
                     is_core=topic.is_core,
+                    document_id=topic.document_id or chapter.document_id,
                     blocks=blocks,
                 )
             )
@@ -110,11 +116,12 @@ class StudyBlockPacingCalculator:
             description=chapter.description or "",
             target_page_start=chapter.target_page_start,
             target_page_end=chapter.target_page_end,
+            document_id=chapter.document_id,
             topics=planned_topics,
         )
 
     def _slice_into_study_blocks(
-        self, topic: RawStudyTopic
+        self, topic: RawStudyTopic, fallback_doc_id: str | None = None
     ) -> list[AllocatedStudyBlock]:
         """Slices a topic's pages into discrete 25-minute Pomodoro study blocks."""
         start = min(topic.target_page_start, topic.target_page_end)
@@ -125,6 +132,7 @@ class StudyBlockPacingCalculator:
         )
         total_estimated = page_count * mins_per_page
         block_count = max(1, math.ceil(total_estimated / self.POMODORO_BLOCK_MINUTES))
+        resolved_doc_id = topic.document_id or fallback_doc_id
 
         if block_count == 1:
             return [
@@ -135,10 +143,13 @@ class StudyBlockPacingCalculator:
                     target_page_end=end,
                     estimated_minutes=max(15, min(30, total_estimated)),
                     is_core=topic.is_core,
+                    document_id=resolved_doc_id,
                 )
             ]
 
-        return self._create_multi_blocks(topic, start, end, page_count, block_count)
+        return self._create_multi_blocks(
+            topic, start, end, page_count, block_count, resolved_doc_id
+        )
 
     def _create_multi_blocks(
         self,
@@ -147,6 +158,7 @@ class StudyBlockPacingCalculator:
         end: int,
         page_count: int,
         block_count: int,
+        document_id: str | None = None,
     ) -> list[AllocatedStudyBlock]:
         """Divides multi-block topics across sequential page segments without truncation."""
         blocks: list[AllocatedStudyBlock] = []
@@ -167,6 +179,7 @@ class StudyBlockPacingCalculator:
                         target_page_end=end_page,
                         estimated_minutes=self.POMODORO_BLOCK_MINUTES,
                         is_core=topic.is_core,
+                        document_id=document_id,
                     )
                 )
                 current_page = end_page + 1
@@ -181,6 +194,7 @@ class StudyBlockPacingCalculator:
                         target_page_end=end,
                         estimated_minutes=self.POMODORO_BLOCK_MINUTES,
                         is_core=topic.is_core,
+                        document_id=document_id,
                     )
                 )
 
