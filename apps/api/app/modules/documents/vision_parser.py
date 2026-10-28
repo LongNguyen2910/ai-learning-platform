@@ -19,6 +19,9 @@ _OCR_CORE_INSTRUCTIONS = """YÊU CẦU BẮT BUỘC:
      \\lim_{x \\to 0} \\frac{\\sin x}{x} = 1
      $$
    - Chuẩn hóa toàn bộ ký hiệu toán về mã LaTeX chuẩn (dùng \\frac, \\sum, \\int, \\alpha, \\beta...). Tuyệt đối không dùng ký tự Unicode rời rạc thay cho công thức toán.
+   - ĐÁNH SỐ PHƯƠNG TRÌNH (Equation Numbering):
+     Nếu công thức toán có số thứ tự / số hiệu ở cuối dòng (ví dụ: (1), (2), (4)...), BẮT BUỘC đặt trong khối công thức display `$$` và dùng cú pháp `\\tag{số}` (ví dụ: `\\tag{4}`, `\\tag{5}`) để KaTeX có thể parse được.
+     TUYỆT ĐỐI KHÔNG dùng cú pháp TeX cổ `\\eqno(4)` hay `\\eqno`.
 
 2. HÌNH ẢNH, SƠ ĐỒ & ĐỒ THỊ:
    - Với mỗi sơ đồ, hình vẽ, đồ thị xuất hiện trên trang, hãy tạo một khối mô tả riêng theo đúng định dạng:
@@ -56,6 +59,35 @@ def clean_markdown_fences(text: str) -> str:
     if match:
         return match.group(1).strip()
     return stripped
+
+
+def normalize_katex_syntax(text: str) -> str:
+    """Normalizes TeX equation numbering commands to KaTeX-supported \\tag{...} syntax.
+
+    KaTeX does not support primitive TeX \\eqno or \\leqno, requiring \\tag{...} instead.
+    Converts:
+        \\eqno(4)   -> \\tag{4}
+        \\eqno (4)  -> \\tag{4}
+        \\eqno{(4)} -> \\tag{4}
+        \\eqno{4}   -> \\tag{4}
+        \\eqno 4    -> \\tag{4}
+        \\leqno(4)  -> \\tag{4}
+    """
+    if not text or ("\\eqno" not in text and "\\leqno" not in text):
+        return text
+
+    pattern = re.compile(
+        r"\\(?:eqno|leqno)(?:\s*\(([^)]+)\)|\s*\{([^}]+)\}|\s+([0-9a-zA-Z*._-]+))"
+    )
+
+    def _replace(match: re.Match) -> str:
+        raw_val = match.group(1) or match.group(2) or match.group(3) or ""
+        val = raw_val.strip()
+        if val.startswith("(") and val.endswith(")"):
+            val = val[1:-1].strip()
+        return f"\\tag{{{val}}}"
+
+    return pattern.sub(_replace, text)
 
 
 def is_retryable_exception(exc: Exception) -> bool:
@@ -191,6 +223,7 @@ class GeminiVisionParser:
 
                     raw_text = response.text or ""
                     markdown_content = clean_markdown_fences(raw_text)
+                    markdown_content = normalize_katex_syntax(markdown_content)
 
                     # Extract metadata flags
                     has_formula = bool(
@@ -369,6 +402,7 @@ class GeminiVisionParser:
 
         # Parse markdown response by page separator
         cleaned_text = clean_markdown_fences(raw_text)
+        cleaned_text = normalize_katex_syntax(cleaned_text)
         parts = re.split(r"<!--\s*PAGE_BREAK:\s*(\d+)\s*-->", cleaned_text)
         results: dict[int, tuple[str, ParsedPageMetadata]] = {}
 

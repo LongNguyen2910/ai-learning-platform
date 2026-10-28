@@ -12,10 +12,33 @@ interface ChatMarkdownRendererProps {
   className?: string
 }
 
+/**
+ * Normalizes LaTeX math syntax to be KaTeX compatible.
+ * Converts TeX primitive equation numbering (\eqno, \leqno) into KaTeX-supported \tag{...}.
+ */
+function normalizeLatex(formula: string): string {
+  if (!formula || (!formula.includes("\\eqno") && !formula.includes("\\leqno"))) {
+    return formula
+  }
+  return formula.replace(
+    /\\(?:eqno|leqno)(?:\s*\(([^)]+)\)|\s*\{([^}]+)\}|\s+([0-9a-zA-Z*._-]+))/g,
+    (_, p1, p2, p3) => {
+      let val = (p1 || p2 || p3 || "").trim()
+      if (val.startsWith("(") && val.endsWith(")")) {
+        val = val.slice(1, -1).trim()
+      }
+      return `\\tag{${val}}`
+    }
+  )
+}
+
 function renderLatex(formula: string, displayMode: boolean): string {
   try {
-    return katex.renderToString(formula.trim(), {
-      displayMode,
+    const cleanFormula = normalizeLatex(formula.trim())
+    const effectiveDisplayMode = displayMode || /\\tag\b/.test(cleanFormula)
+
+    return katex.renderToString(cleanFormula, {
+      displayMode: effectiveDisplayMode,
       throwOnError: false,
       strict: "ignore",
       output: "htmlAndMathml",
@@ -116,11 +139,17 @@ export const ChatMarkdownRenderer = React.memo(function ChatMarkdownRenderer({
         // 3. Inline math: $...$
         if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
           const formula = part.slice(1, -1)
-          const html = renderLatex(formula, false)
+          const hasTag = /\\(?:tag|eqno|leqno)\b/.test(formula)
+          const isDisplay = hasTag
+          const html = renderLatex(formula, isDisplay)
           nodes.push(
             <span
               key={key}
-              className="inline-block align-middle mx-0.5"
+              className={
+                isDisplay
+                  ? "block my-2 overflow-x-auto py-1 text-center"
+                  : "inline-block align-middle mx-0.5"
+              }
               dangerouslySetInnerHTML={{ __html: html }}
             />
           )

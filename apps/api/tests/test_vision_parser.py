@@ -7,6 +7,7 @@ from google.genai import errors
 from app.modules.documents.vision_parser import (
     GeminiVisionParser,
     is_retryable_exception,
+    normalize_katex_syntax,
 )
 
 
@@ -349,6 +350,41 @@ async def test_run_ingestion_pipeline_batching_groups_pages(tmp_path, monkeypatc
         page_file = pages_dir / f"page_{i}.md"
         assert page_file.is_file()
         assert f"# Markdown for page {i}" in page_file.read_text(encoding="utf-8")
+
+
+def test_normalize_katex_syntax():
+    # Basic \eqno(4)
+    raw = r"$$ Q = N \times D + D \times log_2(V). \eqno(4) $$"
+    expected = r"$$ Q = N \times D + D \times log_2(V). \tag{4} $$"
+    assert normalize_katex_syntax(raw) == expected
+
+    # With space \eqno (5)
+    raw_space = r"$$ Q = C \times (D + D \times log_2(V)), \eqno (5) $$"
+    expected_space = r"$$ Q = C \times (D + D \times log_2(V)), \tag{5} $$"
+    assert normalize_katex_syntax(raw_space) == expected_space
+
+    # Decimal equation numbers \eqno (12.3)
+    raw_dec = r"E = mc^2 \eqno (12.3)"
+    assert normalize_katex_syntax(raw_dec) == r"E = mc^2 \tag{12.3}"
+
+    # Braced variations \eqno{(6)} and \eqno{7}
+    assert normalize_katex_syntax(r"a + b = c \eqno{(6)}") == r"a + b = c \tag{6}"
+    assert normalize_katex_syntax(r"a + b = c \eqno{7}") == r"a + b = c \tag{7}"
+
+    # Bare number \eqno 8
+    assert normalize_katex_syntax(r"a + b = c \eqno 8") == r"a + b = c \tag{8}"
+
+    # Left equation numbering \leqno(9)
+    assert normalize_katex_syntax(r"x + y = z \leqno(9)") == r"x + y = z \tag{9}"
+
+    # Non-math text or normal formulas without eqno remain unchanged
+    normal = r"Công thức $E = mc^2$ và khối $$f(x) = \sin(x)$$"
+    assert normalize_katex_syntax(normal) == normal
+
+    # Empty string or None
+    assert normalize_katex_syntax("") == ""
+    assert normalize_katex_syntax(None) is None
+
 
 
 

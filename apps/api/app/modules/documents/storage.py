@@ -159,6 +159,11 @@ class DocumentStorage:
             full_file = self.get_full_doc_path(document_id)
             content = full_file.read_text(encoding="utf-8") if full_file.is_file() else None
 
+        if content:
+            from app.modules.documents.vision_parser import normalize_katex_syntax
+
+            content = normalize_katex_syntax(content)
+
         return DocumentContentResponse(
             document_id=metadata.document_id,
             user_id=metadata.user_id,

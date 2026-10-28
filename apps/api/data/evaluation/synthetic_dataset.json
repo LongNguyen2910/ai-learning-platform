@@ -1,0 +1,23 @@
+[
+  {
+    "user_input": "What is the time complexity of random access in an Array, and why?",
+    "reference": "An Array provides $O(1)$ random access time complexity because its elements are stored at contiguous memory locations, which allows access via indexing.",
+    "retrieved_contexts": [
+      "An Array is a collection of elements stored at contiguous memory locations. It provides $O(1)$ random access time complexity via indexing, but insertion and deletion at arbitrary positions require shifting elements, yielding $O(n)$ time complexity."
+    ]
+  },
+  {
+    "user_input": "How do Chaining and Open Addressing function in Hash Tables?",
+    "reference": "Chaining and Open Addressing are common methods used to resolve collisions in Hash Tables. Chaining uses linked lists in each bucket, while Open Addressing uses probing.",
+    "retrieved_contexts": [
+      "Collisions are commonly resolved using Chaining (linked lists in each bucket) or Open Addressing (probing)."
+    ]
+  },
+  {
+    "user_input": "What property must hold true for the keys in the left and right subtrees of any given node in a Binary Search Tree?",
+    "reference": "For any node in a Binary Search Tree, all keys in its left subtree must be strictly less than its key, and all keys in its right subtree must be strictly greater.",
+    "retrieved_contexts": [
+      "A Binary Search Tree is a node-based binary tree data structure where each node has at most two children. For any node, all keys in its left subtree are strictly less than its key, and all keys in its right subtree are strictly greater."
+    ]
+  }
+]
