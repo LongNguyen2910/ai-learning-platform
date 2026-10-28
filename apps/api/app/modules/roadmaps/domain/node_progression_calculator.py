@@ -6,6 +6,7 @@ from app.modules.roadmaps.exceptions import (
     NodeLockedException,
     NodeNotFoundException,
     NodeNotLeafException,
+    PrerequisiteNotCompletedException,
 )
 from app.modules.roadmaps.models import RoadmapNode
 
@@ -56,6 +57,10 @@ class NodeProgressionCalculator:
                 progress_percentage=progress,
                 roadmap_status=status,
             )
+
+        for leaf in leaf_nodes:
+            if leaf.order_index < target_node.order_index and not leaf.is_completed:
+                raise PrerequisiteNotCompletedException(target_node.id, leaf.id)
 
         target_node.is_completed = True
         target_node.completed_at = current_time

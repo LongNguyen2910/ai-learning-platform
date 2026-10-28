@@ -1,7 +1,14 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from app.modules.roadmaps.domain.study_session_mode import StudySessionMode
 
@@ -24,6 +31,15 @@ class RawStudyTopic(BaseModel):
         description="1: Dễ/Khái niệm, 2: Trung bình/Ứng dụng, 3: Phức tạp/Toán sâu",
     )
 
+    @model_validator(mode="after")
+    def normalize_topic_pages(self) -> "RawStudyTopic":
+        if self.target_page_start > self.target_page_end:
+            self.target_page_start, self.target_page_end = (
+                self.target_page_end,
+                self.target_page_start,
+            )
+        return self
+
 
 class RawChapterOutline(BaseModel):
     """Pydantic schema representing a chapter/module extracted by LLM."""
@@ -35,6 +51,15 @@ class RawChapterOutline(BaseModel):
     topics: list[RawStudyTopic] = Field(
         default_factory=list, description="Danh sách các chủ đề con"
     )
+
+    @model_validator(mode="after")
+    def normalize_chapter_pages(self) -> "RawChapterOutline":
+        if self.target_page_start > self.target_page_end:
+            self.target_page_start, self.target_page_end = (
+                self.target_page_end,
+                self.target_page_start,
+            )
+        return self
 
 
 class RawCurriculumOutline(BaseModel):
@@ -64,11 +89,34 @@ class RoadmapGenerateRequest(BaseModel):
         description="Mục tiêu cụ thể của người học (ví dụ: thi qua môn điểm A, nắm chắc chương 1-3)",
     )
 
+    @field_validator("title")
+    @classmethod
+    def validate_title(cls, v: str) -> str:
+        cleaned = v.strip()
+        if len(cleaned) < 2:
+            raise ValueError("title must have at least 2 non-whitespace characters.")
+        return cleaned
+
     @field_validator("target_date")
     @classmethod
     def validate_target_date(cls, v: date) -> date:
-        if v <= date.today():
+        today = date.today()
+        if v <= today:
             raise ValueError("target_date must be in the future.")
+        if (v - today).days > 366:
+            raise ValueError("target_date cannot be more than 1 year (366 days) in the future.")
+        return v
+
+    @field_validator("study_goal")
+    @classmethod
+    def validate_study_goal(cls, v: str | None) -> str | None:
+        if v is not None:
+            cleaned = v.strip()
+            if not cleaned:
+                return None
+            if len(cleaned) > 1000:
+                raise ValueError("study_goal cannot exceed 1000 characters.")
+            return cleaned
         return v
 
 

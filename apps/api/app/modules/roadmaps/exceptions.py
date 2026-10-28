@@ -81,3 +81,28 @@ class RoadmapAccessForbiddenException(RoadmapDomainException):
     def __init__(self, roadmap_id: uuid.UUID | str) -> None:
         super().__init__(f"You do not have access to roadmap '{roadmap_id}'.")
         self.roadmap_id = roadmap_id
+
+
+class RoadmapNotActiveException(RoadmapDomainException):
+    """Raised when attempting to modify a roadmap that is archived or inactive."""
+
+    def __init__(self, roadmap_id: uuid.UUID | str, status: str) -> None:
+        super().__init__(
+            f"Roadmap '{roadmap_id}' cannot be modified because its status is '{status}'."
+        )
+        self.roadmap_id = roadmap_id
+        self.status = status
+
+
+class PrerequisiteNotCompletedException(RoadmapDomainException):
+    """Raised when attempting to complete a node before previous study blocks are completed."""
+
+    def __init__(
+        self, node_id: uuid.UUID | str, prerequisite_node_id: uuid.UUID | str
+    ) -> None:
+        super().__init__(
+            f"Cannot complete node '{node_id}' before previous node '{prerequisite_node_id}' is completed."
+        )
+        self.node_id = node_id
+        self.prerequisite_node_id = prerequisite_node_id
+

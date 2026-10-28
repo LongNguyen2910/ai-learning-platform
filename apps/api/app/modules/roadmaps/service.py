@@ -14,6 +14,7 @@ from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
     NodeNotFoundException,
     RoadmapAccessForbiddenException,
+    RoadmapNotActiveException,
     RoadmapNotFoundException,
     SubjectNotFoundException,
 )
@@ -67,6 +68,9 @@ class RoadmapService:
         roadmap = await self.repo.get_roadmap_by_id(node.roadmap_id)
         if not roadmap:
             raise RoadmapNotFoundException(node.roadmap_id)
+
+        if roadmap.status == "archived":
+            raise RoadmapNotActiveException(roadmap.id, roadmap.status)
 
         if roadmap.user_id != user_id and user_role != "admin":
             raise RoadmapAccessForbiddenException(roadmap.id)

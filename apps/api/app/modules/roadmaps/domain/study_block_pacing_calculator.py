@@ -1,5 +1,5 @@
 import math
-from datetime import date
+from datetime import date, datetime
 from typing import ClassVar
 
 from app.modules.roadmaps.domain.entities import (
@@ -24,15 +24,31 @@ class StudyBlockPacingCalculator:
 
     POMODORO_BLOCK_MINUTES: int = 25
     MINUTES_PER_PAGE_BY_COMPLEXITY: ClassVar[dict[int, int]] = {1: 5, 2: 7, 3: 10}
+    MAX_STUDY_HORIZON_DAYS: int = 366
+    MIN_STUDY_HOURS_PER_DAY: float = 0.5
+    MAX_STUDY_HOURS_PER_DAY: float = 12.0
 
     def calculate_available_minutes(
         self, target_date: date, today: date, hours_per_day: float
     ) -> int:
         """Computes total available study minutes between today and target date."""
-        if target_date <= today:
+        target_d = target_date.date() if isinstance(target_date, datetime) else target_date
+        today_d = today.date() if isinstance(today, datetime) else today
+
+        if target_d <= today_d:
             raise InvalidStudyGoalException("target_date must be in the future.")
 
-        total_days = (target_date - today).days
+        total_days = (target_d - today_d).days
+        if total_days > self.MAX_STUDY_HORIZON_DAYS:
+            raise InvalidStudyGoalException(
+                f"target_date cannot exceed {self.MAX_STUDY_HORIZON_DAYS} days in the future (got {total_days} days)."
+            )
+
+        if not (self.MIN_STUDY_HOURS_PER_DAY <= hours_per_day <= self.MAX_STUDY_HOURS_PER_DAY):
+            raise InvalidStudyGoalException(
+                f"available_hours_per_day must be between {self.MIN_STUDY_HOURS_PER_DAY} and {self.MAX_STUDY_HOURS_PER_DAY}."
+            )
+
         return int(total_days * hours_per_day * 60)
 
     def allocate(
@@ -44,6 +60,9 @@ class StudyBlockPacingCalculator:
         session_mode: StudySessionMode = StudySessionMode.AUTO,
     ) -> list[PlannedChapterNode]:
         """Calculates pacing, prunes secondary content if constrained, and slices blocks."""
+        if not curriculum.chapters:
+            raise InvalidStudyGoalException("Curriculum must contain at least one chapter.")
+
         available_minutes = self.calculate_available_minutes(
             target_date, today, hours_per_day
         )
@@ -57,6 +76,9 @@ class StudyBlockPacingCalculator:
             )
             if planned_chapter.topics:
                 planned_chapters.append(planned_chapter)
+
+        if not planned_chapters:
+            raise InvalidStudyGoalException("No study topics available for the given time constraint.")
 
         return planned_chapters
 
