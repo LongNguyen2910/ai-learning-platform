@@ -13,7 +13,6 @@ import {
   MessageSquare,
   GraduationCap,
   ShieldAlert,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Loader2,
@@ -21,8 +20,6 @@ import {
   RotateCcw,
   FileSearch,
   Filter,
-  Sigma,
-  Image as ImageIcon,
   History,
   Trash2,
 } from "lucide-react"
@@ -78,27 +75,6 @@ const SUGGESTED_PROMPTS = [
     prompt:
       "Hãy đặt cho mình một câu hỏi Socratic để kiểm tra xem mình đã hiểu đúng nội dung trang này chưa.",
     socratic: true,
-  },
-]
-
-const SOCRATIC_TIERS = [
-  {
-    tier: 1,
-    shortLabel: "Tầng 1",
-    title: "Nhắc Lý thuyết & Công thức",
-    desc: "Gợi mở định nghĩa/công thức gốc kèm trang trích dẫn",
-  },
-  {
-    tier: 2,
-    shortLabel: "Tầng 2",
-    title: "Bài mẫu Tương tự",
-    desc: "Minh họa quy trình tư duy qua ví dụ số liệu đơn giản",
-  },
-  {
-    tier: 3,
-    shortLabel: "Tầng 3",
-    title: "Dẫn dắt Từng bước",
-    desc: "Chia nhỏ bài toán và đồng hành tính từng bước",
   },
 ]
 
@@ -861,115 +837,51 @@ export function AiTutorChatPanel({
               </button>
             </div>
 
-            {/* 3-Tier Stepper when Socratic Mode is ON */}
-            {socraticEnabled && (
-              <div className="pt-0.5 space-y-1.5">
-                <div className="grid grid-cols-3 gap-1.5">
-                  {SOCRATIC_TIERS.map((step) => {
-                    const isActive = currentTier === step.tier
-                    const isPassed = currentTier > step.tier || lastSolved
-                    return (
-                      <button
-                        key={step.tier}
-                        type="button"
-                        disabled={isStreaming}
-                        onClick={() => {
-                          if (messages.length > 0 && !isStreaming) {
-                            void sendMessage(
-                              `Hãy hỗ trợ mình ở ${step.shortLabel} (${step.title}) cho bài toán đang làm nhé.`,
-                              {
-                                forceSocratic: true,
-                                requestedTier: step.tier,
-                              }
-                            )
+            {/* Sequential Socratic Actions when in an active problem */}
+            {socraticEnabled && currentTier > 0 && (
+              <div className="flex items-center justify-between gap-1.5 pt-0.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {currentTier < 3 && (
+                    <button
+                      type="button"
+                      disabled={isStreaming}
+                      onClick={() =>
+                        void sendMessage(
+                          "Mình vẫn chưa hiểu rõ, bạn gợi ý thêm bằng ví dụ hoặc bước cụ thể hơn giúp mình nhé!",
+                          {
+                            forceSocratic: true,
+                            requestedTier: Math.min(currentTier + 1, 3),
                           }
-                        }}
-                        title={`${step.title}: ${step.desc}`}
-                        className={`rounded-lg px-2 py-1.5 text-left border transition-all cursor-pointer disabled:opacity-50 ${
-                          isActive
-                            ? "border-indigo-500 bg-indigo-50/90 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 shadow-2xs"
-                            : isPassed
-                              ? "border-emerald-300/80 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300"
-                              : "border-slate-200/80 dark:border-slate-800 bg-white/80 dark:bg-slate-900/60 text-slate-500 dark:text-slate-400 hover:border-indigo-300"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-1">
-                          <span className="text-[10px] font-bold uppercase tracking-wider">
-                            {step.shortLabel}
-                          </span>
-                          {isActive && (
-                            <span className="h-1.5 w-1.5 rounded-full bg-indigo-600 animate-pulse" />
-                          )}
-                          {isPassed && !isActive && (
-                            <CheckCircle2 className="h-3 w-3 text-emerald-600 shrink-0" />
-                          )}
-                        </div>
-                        <div className="text-[11px] font-medium truncate mt-0.5">
-                          {step.title}
-                        </div>
-                      </button>
-                    )
-                  })}
+                        )
+                      }
+                      className="h-6 px-2.5 rounded-md bg-indigo-100/80 hover:bg-indigo-200/80 dark:bg-indigo-950/80 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      <Lightbulb className="h-3 w-3" />
+                      <span>Gợi ý sâu hơn (Lên Tầng {currentTier + 1})</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={isStreaming}
+                    onClick={() => {
+                      setIsNewQuestionFlag(true)
+                      setCurrentTier(1)
+                      setLastSolved(false)
+                    }}
+                    className={`h-6 px-2.5 rounded-md text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
+                      isNewQuestionFlag
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-1 ring-amber-400/40"
+                        : "bg-slate-200/70 hover:bg-slate-300/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+                    }`}
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>
+                      {isNewQuestionFlag
+                        ? "Câu tiếp theo sẽ về Tầng 1"
+                        : "Đổi sang bài tập mới"}
+                    </span>
+                  </button>
                 </div>
-
-                {/* Quick Socratic Actions when in an active problem */}
-                {currentTier > 0 && (
-                  <div className="flex items-center justify-between gap-1.5 pt-0.5">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {currentTier < 3 && (
-                        <button
-                          type="button"
-                          disabled={isStreaming}
-                          onClick={() =>
-                            void sendMessage(
-                              "Mình vẫn chưa hiểu rõ, bạn gợi ý thêm bằng ví dụ hoặc bước cụ thể hơn giúp mình nhé!",
-                              {
-                                forceSocratic: true,
-                                requestedTier: Math.min(currentTier + 1, 3),
-                              }
-                            )
-                          }
-                          className="h-6 px-2 rounded-md bg-indigo-100/80 hover:bg-indigo-200/80 dark:bg-indigo-950/80 dark:hover:bg-indigo-900 text-indigo-700 dark:text-indigo-300 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
-                        >
-                          <Lightbulb className="h-3 w-3" />
-                          <span>Gợi ý sâu hơn (Lên Tầng {currentTier + 1})</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        disabled={isStreaming}
-                        onClick={() => {
-                          setIsNewQuestionFlag(true)
-                          setCurrentTier(1)
-                          setLastSolved(false)
-                        }}
-                        className={`h-6 px-2 rounded-md text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer ${
-                          isNewQuestionFlag
-                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 ring-1 ring-amber-400/40"
-                            : "bg-slate-200/70 hover:bg-slate-300/70 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
-                        }`}
-                      >
-                        <RotateCcw className="h-3 w-3" />
-                        <span>
-                          {isNewQuestionFlag
-                            ? "Câu tiếp theo sẽ về Tầng 1"
-                            : "Đổi sang bài tập mới"}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Solved Celebration Banner */}
-            {lastSolved && (
-              <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/70 px-3 py-2 flex items-center gap-2 text-xs text-emerald-800 dark:text-emerald-200 animate-in fade-in-0 duration-200">
-                <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>
-                  <strong>Xuất sắc!</strong> Bạn đã tự giải quyết thành công bài
-                  toán. Tầng Socratic đã được đặt lại sẵn sàng cho câu hỏi mới!
-                </span>
               </div>
             )}
           </div>
@@ -1180,11 +1092,6 @@ export function AiTutorChatPanel({
                                 >
                                   <BookOpen className="h-3 w-3 stroke-[2]" />
                                   <span>Trang {cit.page_number}</span>
-                                  {cit.score > 0 && (
-                                    <span className="text-[10px] opacity-75 font-mono">
-                                      {Math.round(cit.score * 100)}%
-                                    </span>
-                                  )}
                                 </button>
                               ))}
                             </div>
@@ -1233,18 +1140,6 @@ export function AiTutorChatPanel({
                                         Mở Trang {chunk.page_number} trên PDF
                                       </span>
                                     </button>
-                                    <div className="flex items-center gap-1.5">
-                                      {chunk.has_formula && (
-                                        <span className="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-950/70 text-violet-700 dark:text-violet-300 text-[10px] font-medium inline-flex items-center gap-0.5">
-                                          <Sigma className="h-2.5 w-2.5" />
-                                          Toán LaTeX
-                                        </span>
-                                      )}
-                                      <span className="font-mono text-[10px] text-slate-400">
-                                        Độ khớp: {Math.round(chunk.score * 100)}
-                                        %
-                                      </span>
-                                    </div>
                                   </div>
                                   {chunk.content && (
                                     <div className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-4">
@@ -1466,24 +1361,6 @@ export function AiTutorChatPanel({
                       <BookOpen className="h-3.5 w-3.5 stroke-[2]" />
                       <span>Trang {chunk.page_number}</span>
                     </button>
-
-                    <div className="flex items-center gap-1.5">
-                      {chunk.has_formula && (
-                        <span className="px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950 text-violet-700 dark:text-violet-300 text-[10px] font-semibold inline-flex items-center gap-1">
-                          <Sigma className="h-3 w-3" />
-                          Công thức
-                        </span>
-                      )}
-                      {chunk.has_image && (
-                        <span className="px-2 py-0.5 rounded-full bg-sky-100 dark:bg-sky-950 text-sky-700 dark:text-sky-300 text-[10px] font-semibold inline-flex items-center gap-1">
-                          <ImageIcon className="h-3 w-3" />
-                          Hình ảnh
-                        </span>
-                      )}
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-mono text-[10px] font-semibold">
-                        {Math.round(chunk.score * 100)}% khớp
-                      </span>
-                    </div>
                   </div>
 
                   <div className="text-xs text-slate-700 dark:text-slate-200 bg-white dark:bg-slate-950 rounded-xl p-3 border border-slate-200/60 dark:border-slate-800/70">
