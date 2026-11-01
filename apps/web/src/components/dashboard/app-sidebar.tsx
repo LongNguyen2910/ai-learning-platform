@@ -99,7 +99,7 @@ export function AppSidebar({
                 AI LEARNING
               </span>
               <span className="block text-[11px] font-mono uppercase tracking-wider text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                PLATFORM
+                NHOM 3
               </span>
             </div>
           )}
@@ -205,7 +205,7 @@ export function AppSidebar({
           ) : (
             <>
               <PanelLeftClose className="h-5 w-5 stroke-[1.75]" />
-              <span>Collapse sidebar</span>
+              <span>Collapse</span>
             </>
           )}
         </button>

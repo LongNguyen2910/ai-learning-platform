@@ -34,8 +34,6 @@ import {
   X,
   Trash2,
   Loader2,
-  ChevronLeft,
-  ChevronRight,
 } from "lucide-react"
 
 export type LibraryFilterMode = "all" | "uncategorized" | string
@@ -59,92 +57,25 @@ export function DashboardWorkspace() {
     string | null
   >(null)
 
-  // Horizontal scroll & drag-to-scroll for Subject filter bar
+  // Mouse-wheel horizontal scroll for Subject filter bar
   const subjectScrollRef = React.useRef<HTMLDivElement | null>(null)
-  const [canScrollLeft, setCanScrollLeft] = React.useState(false)
-  const [canScrollRight, setCanScrollRight] = React.useState(false)
-  const [isDraggingSubjects, setIsDraggingSubjects] = React.useState(false)
-  const dragStateRef = React.useRef<{
-    isDown: boolean
-    startX: number
-    scrollLeft: number
-    hasDragged: boolean
-  }>({
-    isDown: false,
-    startX: 0,
-    scrollLeft: 0,
-    hasDragged: false,
-  })
-
-  const updateSubjectScrollButtons = React.useCallback(() => {
-    const el = subjectScrollRef.current
-    if (!el) return
-    setCanScrollLeft(el.scrollLeft > 2)
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2)
-  }, [])
 
   React.useEffect(() => {
-    updateSubjectScrollButtons()
-    window.addEventListener("resize", updateSubjectScrollButtons)
-    return () =>
-      window.removeEventListener("resize", updateSubjectScrollButtons)
-  }, [subjects, documents.length, activeSection, updateSubjectScrollButtons])
-
-  const scrollSubjectBarBy = (deltaX: number) => {
     const el = subjectScrollRef.current
     if (!el) return
-    el.scrollBy({ left: deltaX, behavior: "smooth" })
-  }
 
-  const handleSubjectBarMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
-    const el = subjectScrollRef.current
-    if (!el || e.button !== 0) return
-    dragStateRef.current = {
-      isDown: true,
-      startX: e.pageX - el.offsetLeft,
-      scrollLeft: el.scrollLeft,
-      hasDragged: false,
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > 0) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY
+      }
     }
-  }
 
-  const handleSubjectBarMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-    const el = subjectScrollRef.current
-    if (!el || !dragStateRef.current.isDown) return
-    const x = e.pageX - el.offsetLeft
-    const walk = x - dragStateRef.current.startX
-    if (Math.abs(walk) > 5) {
-      dragStateRef.current.hasDragged = true
-      if (!isDraggingSubjects) setIsDraggingSubjects(true)
-      e.preventDefault()
-      el.scrollLeft = dragStateRef.current.scrollLeft - walk * 1.25
-      updateSubjectScrollButtons()
+    el.addEventListener("wheel", onWheel, { passive: false })
+    return () => {
+      el.removeEventListener("wheel", onWheel)
     }
-  }
-
-  const stopSubjectBarDragging = () => {
-    if (!dragStateRef.current.isDown) return
-    dragStateRef.current.isDown = false
-    setIsDraggingSubjects(false)
-  }
-
-  const handleSubjectBarClickCapture = (
-    e: React.MouseEvent<HTMLDivElement>
-  ) => {
-    if (dragStateRef.current.hasDragged) {
-      e.stopPropagation()
-      e.preventDefault()
-      dragStateRef.current.hasDragged = false
-    }
-  }
-
-  const handleSubjectBarWheel = (e: React.WheelEvent<HTMLDivElement>) => {
-    const el = subjectScrollRef.current
-    if (!el) return
-    if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > 0) {
-      el.scrollLeft += e.deltaY
-      updateSubjectScrollButtons()
-    }
-  }
+  }, [subjects.length, activeSection])
 
   const [selectedDocId, setSelectedDocId] = React.useState<string | null>(null)
   const [lastOpenedDocId, setLastOpenedDocId] = React.useState<string | null>(
@@ -488,7 +419,7 @@ export function DashboardWorkspace() {
                 </h1>
                 <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400">
                   Upload PDF textbooks and assign them to subjects to study with
-                  AI Tutor or synthesize into a unified study roadmap.
+                  AI Tutor.
                 </p>
               </div>
 
@@ -597,150 +528,115 @@ export function DashboardWorkspace() {
                 </div>
               </div>
 
-              {/* Unified Subject Filter Bar with Drag-to-Scroll, Wheel Scroll & Arrow Controls */}
-              <div className="relative flex items-center gap-1.5 min-w-0 w-full">
-                {canScrollLeft && (
-                  <button
-                    type="button"
-                    onClick={() => scrollSubjectBarBy(-240)}
-                    aria-label="Scroll subjects left"
-                    title="Scroll left"
-                    className="h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 shadow-2xs transition-colors cursor-pointer active:scale-[0.96]"
-                  >
-                    <ChevronLeft className="h-4 w-4 stroke-[2]" />
-                  </button>
-                )}
-
-                <div
-                  ref={subjectScrollRef}
-                  role="tablist"
-                  aria-label="Filter documents by subject"
-                  onScroll={updateSubjectScrollButtons}
-                  onWheel={handleSubjectBarWheel}
-                  onMouseDown={handleSubjectBarMouseDown}
-                  onMouseMove={handleSubjectBarMouseMove}
-                  onMouseUp={stopSubjectBarDragging}
-                  onMouseLeave={stopSubjectBarDragging}
-                  onClickCapture={handleSubjectBarClickCapture}
-                  className={`flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto pb-1.5 select-none [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-200 dark:[&::-webkit-scrollbar-thumb]:bg-slate-800 hover:[&::-webkit-scrollbar-thumb]:bg-slate-300 dark:hover:[&::-webkit-scrollbar-thumb]:bg-slate-700 ${
-                    isDraggingSubjects ? "cursor-grabbing" : "cursor-grab"
+              {/* Unified Subject Filter Bar with Mouse-Wheel Horizontal Scroll */}
+              <div
+                ref={subjectScrollRef}
+                role="tablist"
+                aria-label="Filter documents by subject"
+                className="w-full min-w-0 flex items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={libraryFilter === "all"}
+                  onClick={() => setLibraryFilter("all")}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer tabular-nums ${
+                    libraryFilter === "all"
+                      ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
+                      : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                   }`}
                 >
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={libraryFilter === "all"}
-                    onClick={() => setLibraryFilter("all")}
-                    className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer tabular-nums ${
+                  <span>All</span>
+                  <span
+                    className={`font-mono text-[11px] ${
                       libraryFilter === "all"
-                        ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
-                        : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        ? "text-white/85"
+                        : "text-slate-400"
                     }`}
                   >
-                    <span>All</span>
-                    <span
-                      className={`font-mono text-[11px] ${
-                        libraryFilter === "all"
-                          ? "text-white/85"
-                          : "text-slate-400"
+                    ({documents.length})
+                  </span>
+                </button>
+
+                {subjects.map((subj) => {
+                  const count = documents.filter(
+                    (d) => d.subject_id === subj.id
+                  ).length
+                  const isActive = libraryFilter === subj.id
+                  const isDeletingSubj = deletingSubjectId === subj.id
+
+                  return (
+                    <div
+                      key={subj.id}
+                      className={`h-8 pl-3 pr-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors tabular-nums ${
+                        isActive
+                          ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
+                          : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
                       }`}
                     >
-                      ({documents.length})
-                    </span>
-                  </button>
-
-                  {subjects.map((subj) => {
-                    const count = documents.filter(
-                      (d) => d.subject_id === subj.id
-                    ).length
-                    const isActive = libraryFilter === subj.id
-                    const isDeletingSubj = deletingSubjectId === subj.id
-
-                    return (
-                      <div
-                        key={subj.id}
-                        className={`h-8 pl-3 pr-1.5 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors tabular-nums ${
-                          isActive
-                            ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
-                            : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        }`}
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={isActive}
+                        onClick={() => setLibraryFilter(subj.id)}
+                        className="inline-flex items-center gap-1.5 h-full cursor-pointer focus-visible:outline-none"
                       >
-                        <button
-                          type="button"
-                          role="tab"
-                          aria-selected={isActive}
-                          onClick={() => setLibraryFilter(subj.id)}
-                          className="inline-flex items-center gap-1.5 h-full cursor-pointer focus-visible:outline-none"
-                        >
-                          <span className="truncate max-w-[160px]">
-                            {subj.name}
-                          </span>
-                          <span
-                            className={`font-mono text-[11px] ${
-                              isActive ? "text-white/85" : "text-slate-400"
-                            }`}
-                          >
-                            ({count})
-                          </span>
-                        </button>
-
-                        <button
-                          type="button"
-                          disabled={isDeletingSubj}
-                          onClick={(e) => void handleDeleteSubject(e, subj.id)}
-                          aria-label={`Delete subject ${subj.name}`}
-                          title={`Delete subject ${subj.name}`}
-                          className={`h-5 w-5 rounded flex items-center justify-center transition-colors cursor-pointer ${
-                            isActive
-                              ? "text-white/75 hover:text-white hover:bg-white/20"
-                              : "text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        <span className="truncate max-w-[160px]">
+                          {subj.name}
+                        </span>
+                        <span
+                          className={`font-mono text-[11px] ${
+                            isActive ? "text-white/85" : "text-slate-400"
                           }`}
                         >
-                          {isDeletingSubj ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3 w-3 stroke-[1.8]" />
-                          )}
-                        </button>
-                      </div>
-                    )
-                  })}
+                          ({count})
+                        </span>
+                      </button>
 
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={libraryFilter === "uncategorized"}
-                    onClick={() => setLibraryFilter("uncategorized")}
-                    className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer tabular-nums ${
+                      <button
+                        type="button"
+                        disabled={isDeletingSubj}
+                        onClick={(e) => void handleDeleteSubject(e, subj.id)}
+                        aria-label={`Delete subject ${subj.name}`}
+                        title={`Delete subject ${subj.name}`}
+                        className={`h-5 w-5 rounded flex items-center justify-center transition-colors cursor-pointer ${
+                          isActive
+                            ? "text-white/75 hover:text-white hover:bg-white/20"
+                            : "text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        }`}
+                      >
+                        {isDeletingSubj ? (
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3 w-3 stroke-[1.8]" />
+                        )}
+                      </button>
+                    </div>
+                  )
+                })}
+
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={libraryFilter === "uncategorized"}
+                  onClick={() => setLibraryFilter("uncategorized")}
+                  className={`h-8 px-3 rounded-lg text-xs font-medium inline-flex items-center gap-1.5 shrink-0 transition-colors cursor-pointer tabular-nums ${
+                    libraryFilter === "uncategorized"
+                      ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
+                      : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  }`}
+                >
+                  <span>Uncategorized</span>
+                  <span
+                    className={`font-mono text-[11px] ${
                       libraryFilter === "uncategorized"
-                        ? "bg-[#0A77FF] text-white font-semibold shadow-2xs"
-                        : "bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        ? "text-white/85"
+                        : "text-slate-400"
                     }`}
                   >
-                    <span>Uncategorized</span>
-                    <span
-                      className={`font-mono text-[11px] ${
-                        libraryFilter === "uncategorized"
-                          ? "text-white/85"
-                          : "text-slate-400"
-                      }`}
-                    >
-                      ({uncategorizedCount})
-                    </span>
-                  </button>
-                </div>
-
-                {canScrollRight && (
-                  <button
-                    type="button"
-                    onClick={() => scrollSubjectBarBy(240)}
-                    aria-label="Scroll subjects right"
-                    title="Scroll right"
-                    className="h-8 w-8 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 flex items-center justify-center shrink-0 shadow-2xs transition-colors cursor-pointer active:scale-[0.96]"
-                  >
-                    <ChevronRight className="h-4 w-4 stroke-[2]" />
-                  </button>
-                )}
+                    ({uncategorizedCount})
+                  </span>
+                </button>
               </div>
 
               <DocumentList
