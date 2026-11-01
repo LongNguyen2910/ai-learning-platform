@@ -269,3 +269,108 @@ def test_roadmap_generate_request_validates_future_date():
             available_hours_per_day=2.0,
         )
 
+
+
+def test_fr13_micro_session_mode():
+    from app.modules.roadmaps.domain import StudySessionMode
+
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 10, 24)
+    target_date = today + timedelta(days=14)
+    curriculum = _make_dummy_curriculum()
+
+    chapters = calc.allocate(
+        curriculum,
+        target_date,
+        today,
+        hours_per_day=2.0,
+        session_mode=StudySessionMode.MICRO,
+    )
+    for ch in chapters:
+        for top in ch.topics:
+            for b in top.blocks:
+                assert 15 <= b.estimated_minutes <= 30
+
+
+def test_fr13_deep_work_session_mode():
+    from app.modules.roadmaps.domain import StudySessionMode
+
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 10, 24)
+    target_date = today + timedelta(days=14)
+    curriculum = _make_dummy_curriculum()
+
+    chapters = calc.allocate(
+        curriculum,
+        target_date,
+        today,
+        hours_per_day=2.0,
+        session_mode=StudySessionMode.DEEP_WORK,
+    )
+    for ch in chapters:
+        for top in ch.topics:
+            for b in top.blocks:
+                assert 45 <= b.estimated_minutes <= 90
+
+
+def test_fr13_auto_session_mode_heuristic():
+    from app.modules.roadmaps.domain import StudySessionMode
+
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 10, 24)
+    target_date = today + timedelta(days=14)
+    curriculum = _make_dummy_curriculum()
+
+    # Topic 1: complexity 1 -> micro (15-30m)
+    # Topic 3: complexity 3, hours_per_day 2.0 (>= 1.5) -> deep work (45-90m)
+    chapters = calc.allocate(
+        curriculum,
+        target_date,
+        today,
+        hours_per_day=2.0,
+        session_mode=StudySessionMode.AUTO,
+    )
+    topic_map = {t.title: t for t in chapters[0].topics}
+
+    t1_blocks = topic_map["Định nghĩa giới hạn"].blocks
+    assert all(15 <= b.estimated_minutes <= 30 for b in t1_blocks)
+
+    t3_blocks = topic_map["Mở rộng: Giới hạn suy rộng"].blocks
+    assert all(45 <= b.estimated_minutes <= 90 for b in t3_blocks)
+
+
+def test_fr13_auto_mode_busy_learner_forces_micro():
+    from app.modules.roadmaps.domain import StudySessionMode
+
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 10, 24)
+    target_date = today + timedelta(days=14)
+    curriculum = _make_dummy_curriculum()
+
+    # Learner has 1.0 hour/day (< 1.5) -> even complexity 3 should stay micro
+    chapters = calc.allocate(
+        curriculum,
+        target_date,
+        today,
+        hours_per_day=1.0,
+        session_mode=StudySessionMode.AUTO,
+    )
+    topic_map = {t.title: t for t in chapters[0].topics}
+    if "Mở rộng: Giới hạn suy rộng" in topic_map:
+        t3_blocks = topic_map["Mở rộng: Giới hạn suy rộng"].blocks
+        assert all(15 <= b.estimated_minutes <= 30 for b in t3_blocks)
+
+
+def test_fr13_roadmap_generate_request_accepts_session_mode():
+    from app.modules.roadmaps.domain import StudySessionMode
+    from app.modules.roadmaps.schemas import RoadmapGenerateRequest
+
+    req = RoadmapGenerateRequest(
+        subject_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        title="Lộ trình Micro",
+        target_date=date.today() + timedelta(days=7),
+        available_hours_per_day=2.0,
+        session_mode=StudySessionMode.DEEP_WORK,
+    )
+    assert req.session_mode == StudySessionMode.DEEP_WORK
