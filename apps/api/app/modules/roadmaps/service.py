@@ -10,8 +10,14 @@ from app.modules.roadmaps.ai_curriculum_extractor import (
     AICurriculumExtractor,
     SourceDocumentInput,
 )
+from app.modules.roadmaps.domain.node_progression_calculator import (
+    NodeProgressionCalculator,
+)
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
+    NodeNotFoundException,
+    RoadmapAccessForbiddenException,
+    RoadmapNotActiveException,
     RoadmapNotFoundException,
     SubjectNotFoundException,
 )
@@ -20,6 +26,7 @@ from app.modules.roadmaps.repository import RoadmapRepository
 from app.modules.roadmaps.roadmap_tree_builder import RoadmapTreeBuilder
 from app.modules.roadmaps.schemas import (
     RoadmapGenerateRequest,
+    RoadmapNodeCompletionResponse,
     RoadmapNodeResponse,
     RoadmapResponse,
     RoadmapTaskStatusResponse,
@@ -33,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 class RoadmapService:
-    """Application Service orchestrating initial Roadmap Tree generation (FR-12)."""
+    """Application Service orchestrating Roadmap Tree generation and Progression (FR-12, FR-13, FR-14)."""
 
     def __init__(
         self,
@@ -41,11 +48,13 @@ class RoadmapService:
         extractor: AICurriculumExtractor | None = None,
         calculator: StudyBlockPacingCalculator | None = None,
         builder: RoadmapTreeBuilder | None = None,
+        progression_calculator: NodeProgressionCalculator | None = None,
     ) -> None:
         self.repo = repository
         self.extractor = extractor or AICurriculumExtractor()
         self.calculator = calculator or StudyBlockPacingCalculator()
         self.builder = builder or RoadmapTreeBuilder()
+        self.progression_calculator = progression_calculator or NodeProgressionCalculator()
         self._task_cache: dict[str, RoadmapTaskStatusResponse] = {}
 
     async def _resolve_subject_source_documents(
@@ -172,6 +181,45 @@ class RoadmapService:
 
         return sources
 
+    async def complete_study_block(
+        self,
+        node_id: uuid.UUID,
+        user_id: uuid.UUID,
+        user_role: str = "user",
+    ) -> RoadmapNodeCompletionResponse:
+        """Completes a leaf study block, cascading completion and unlocking next block (FR-14)."""
+        node = await self.repo.get_node_by_id(node_id)
+        if not node:
+            raise NodeNotFoundException(node_id)
+
+        roadmap = await self.repo.get_roadmap_by_id(node.roadmap_id)
+        if not roadmap:
+            raise RoadmapNotFoundException(node.roadmap_id)
+
+        if roadmap.status == "archived":
+            raise RoadmapNotActiveException(roadmap.id, roadmap.status)
+
+        if roadmap.user_id != user_id and user_role != "admin":
+            raise RoadmapAccessForbiddenException(roadmap.id)
+
+        all_nodes = (
+            list(roadmap.nodes)
+            if roadmap.nodes
+            else await self.repo.get_nodes_by_roadmap_id(roadmap.id)
+        )
+        result = self.progression_calculator.calculate_completion(all_nodes, node_id)
+
+        roadmap.progress_percentage = result.progress_percentage
+        roadmap.status = result.roadmap_status
+        await self.repo.session.flush()
+
+        return RoadmapNodeCompletionResponse(
+            completed_node_id=node_id,
+            unlocked_node_ids=result.unlocked_node_ids,
+            progress_percentage=result.progress_percentage,
+            roadmap_status=result.roadmap_status,
+        )
+
     async def initiate_generation(
         self, user_id: uuid.UUID, req: RoadmapGenerateRequest
     ) -> RoadmapTaskStatusResponse:
@@ -181,14 +229,11 @@ class RoadmapService:
             req.target_date, today, req.available_hours_per_day
         )
 
-        # 1. Validate Subject existence and access control
         subject = await self.repo.get_subject_by_id(req.subject_id)
-        if subject is None:
-            raise SubjectNotFoundException(req.subject_id)
-        if subject.user_id != user_id:
+        if subject is None or subject.user_id != user_id:
             raise SubjectNotFoundException(req.subject_id)
 
-        # 2. Validate that at least 1 parsed document exists for this subject (or explicit document_id)
+        # Validate that at least 1 parsed document exists for this subject (or explicit document_id)
         sources = await self._resolve_subject_source_documents(
             user_id=user_id,
             subject_id=req.subject_id,
@@ -262,6 +307,7 @@ class RoadmapService:
                 target_date=req.target_date,
                 today=today,
                 hours_per_day=req.available_hours_per_day,
+                session_mode=req.session_mode,
             )
 
             self._update_task(task_id, 80, "Đang dựng cấu trúc cây 3 tầng...")
@@ -372,9 +418,7 @@ class RoadmapService:
             current_resp = node_map[n.id]
             if n.parent_node_id is None:
                 roots.append(current_resp)
-                continue
-            parent = node_map.get(n.parent_node_id)
-            if parent:
-                parent.children.append(current_resp)
+            elif n.parent_node_id in node_map:
+                node_map[n.parent_node_id].children.append(current_resp)
 
         return roots

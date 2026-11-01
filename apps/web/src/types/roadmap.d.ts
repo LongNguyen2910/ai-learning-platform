@@ -17,6 +17,7 @@ export interface RoadmapNode {
 
 export interface Roadmap {
   id: string;
+  roadmap_id?: string;
   user_id: string;
   subject_id: string;
   title: string;

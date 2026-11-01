@@ -212,3 +212,47 @@ async def test_subject_endpoints_and_full_roadmap_generation_flow(
     first_chapter = tree[0]
     assert first_chapter["is_unlocked"] is True
     assert len(first_chapter["children"]) > 0
+
+    # 7. Test FR-14 Complete Node Endpoint with Real DB Persistence
+    first_leaf = first_chapter["children"][0]["children"][0]
+    first_leaf_id = uuid.UUID(str(first_leaf["id"]))
+    assert first_leaf["is_unlocked"] is True
+    assert first_leaf["is_completed"] is False
+
+    complete_res = await async_client.post(
+        f"/api/v1/roadmaps/nodes/{first_leaf_id}/complete"
+    )
+    assert complete_res.status_code == 200
+    complete_data = complete_res.json()
+    assert complete_data["completed_node_id"] == str(first_leaf_id)
+    assert complete_data["progress_percentage"] > 0
+    assert complete_data["roadmap_status"] == "active"
+
+    # 8. Verify state persistence via Tree endpoint
+    tree_res_updated = await async_client.get(f"/api/v1/roadmaps/{roadmap_id}/tree")
+    assert tree_res_updated.status_code == 200
+    updated_tree = tree_res_updated.json()["tree"]
+
+    all_blocks = [
+        b
+        for ch in updated_tree
+        for top in ch["children"]
+        for b in top["children"]
+    ]
+    completed_leaf = next(b for b in all_blocks if b["id"] == str(first_leaf_id))
+    assert completed_leaf["is_completed"] is True
+    assert completed_leaf["completed_at"] is not None
+
+    if complete_data["unlocked_node_ids"]:
+        unlocked_id = complete_data["unlocked_node_ids"][0]
+        unlocked_block = next(b for b in all_blocks if b["id"] == unlocked_id)
+        assert unlocked_block["is_unlocked"] is True
+
+    # 9. Test GET /api/v1/roadmaps/subject/{subject_id} has roadmap_id field
+    list_sub_res = await async_client.get(f"/api/v1/roadmaps/subject/{subject_id}")
+    assert list_sub_res.status_code == 200
+    sub_roadmaps = list_sub_res.json()
+    assert any(r["roadmap_id"] == str(roadmap_id) for r in sub_roadmaps)
+
+
+
