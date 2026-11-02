@@ -3,6 +3,8 @@ import { getAuthHeaders } from "@/lib/api/documents"
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
+export type StudySessionMode = "auto" | "micro" | "deep_work"
+
 export interface SubjectItem {
   id: string
   user_id: string
@@ -19,6 +21,7 @@ export interface RoadmapGeneratePayload {
   title: string
   target_date: string
   available_hours_per_day: number
+  session_mode?: StudySessionMode
   study_goal?: string | null
 }
 
@@ -65,6 +68,13 @@ export interface RoadmapTreeResponse {
   tree: RoadmapNodeItem[]
   total_nodes: number
   total_estimated_minutes: number
+}
+
+export interface RoadmapNodeCompletionResponse {
+  completed_node_id: string
+  unlocked_node_ids: string[]
+  progress_percentage: number
+  roadmap_status: "active" | "completed" | string
 }
 
 export async function fetchSubjects(): Promise<SubjectItem[]> {
@@ -183,7 +193,10 @@ export async function generateRoadmap(
       Accept: "application/json",
       "Content-Type": "application/json",
     }),
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      session_mode: payload.session_mode ?? "auto",
+    }),
   })
 
   if (!response.ok) {
@@ -228,6 +241,27 @@ export async function fetchRoadmapTree(
     const err = await response.json().catch(() => null)
     throw new Error(
       err?.detail || `Could not load roadmap tree (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+
+export async function completeRoadmapNode(
+  nodeId: string
+): Promise<RoadmapNodeCompletionResponse> {
+  const response = await fetch(`${API_BASE_URL}/roadmaps/nodes/${nodeId}/complete`, {
+    method: "POST",
+    headers: getAuthHeaders({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    }),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Could not complete study block (${response.status})`
     )
   }
 

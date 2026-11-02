@@ -1,3 +1,5 @@
+export type StudySessionMode = "auto" | "micro" | "deep_work";
+
 export interface RoadmapNode {
   id: string;
   roadmap_id: string;
@@ -37,11 +39,12 @@ export interface RoadmapTreeResponse {
 
 export interface RoadmapGenerateRequest {
   subject_id: string;
-  document_id: string;
+  document_id?: string | null;
   title: string;
   target_date: string;
   available_hours_per_day: number;
-  study_goal?: string;
+  session_mode?: StudySessionMode;
+  study_goal?: string | null;
 }
 
 export interface RoadmapTaskStatusResponse {
@@ -51,4 +54,11 @@ export interface RoadmapTaskStatusResponse {
   progress_percent: number;
   message: string;
   error?: string | null;
+}
+
+export interface RoadmapNodeCompletionResponse {
+  completed_node_id: string;
+  unlocked_node_ids: string[];
+  progress_percentage: number;
+  roadmap_status: "active" | "completed" | string;
 }

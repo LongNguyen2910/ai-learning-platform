@@ -17,6 +17,10 @@ import {
   Plus,
   RefreshCw,
   Compass,
+  Lock,
+  PlayCircle,
+  Check,
+  Layers,
 } from "lucide-react"
 import type { DocumentItem } from "@/lib/api/documents"
 import {
@@ -25,6 +29,7 @@ import {
   fetchRoadmapTaskStatus,
   generateRoadmap,
   deleteRoadmap,
+  completeRoadmapNode,
   type SubjectItem,
   type RoadmapItem,
   type RoadmapNodeItem,
@@ -92,6 +97,41 @@ function formatDuration(minutes: number): string {
   return mins > 0 ? `${hrs}h ${mins}m` : `${hrs} hrs`
 }
 
+/**
+ * Finds the Topic IDs that should be auto-expanded by default:
+ * expands any topic containing an unlocked & incomplete study block (or the first topic with blocks).
+ */
+function resolveAutoExpandedTopicIds(
+  tree: RoadmapNodeItem[]
+): Record<string, boolean> {
+  const expanded: Record<string, boolean> = {}
+  let foundActive = false
+
+  for (const ch of tree) {
+    for (const tp of ch.children || []) {
+      const blocks = tp.children || []
+      if (blocks.some((b) => b.is_unlocked && !b.is_completed)) {
+        expanded[tp.id] = true
+        foundActive = true
+      }
+    }
+  }
+
+  if (!foundActive) {
+    for (const ch of tree) {
+      const firstTopicWithBlocks = (ch.children || []).find(
+        (tp) => (tp.children || []).length > 0
+      )
+      if (firstTopicWithBlocks) {
+        expanded[firstTopicWithBlocks.id] = true
+        break
+      }
+    }
+  }
+
+  return expanded
+}
+
 const HOUR_PRESETS = [1.0, 2.0, 3.0, 4.0]
 
 export function RoadmapWorkspace({
@@ -110,6 +150,14 @@ export function RoadmapWorkspace({
     React.useState<RoadmapTreeResponse | null>(null)
   const [isLoadingTree, setIsLoadingTree] = React.useState(false)
   const [treeError, setTreeError] = React.useState<string | null>(null)
+
+  // Node completion state
+  const [completingNodeId, setCompletingNodeId] = React.useState<string | null>(
+    null
+  )
+  const [completionError, setCompletionError] = React.useState<string | null>(
+    null
+  )
 
   // Form states
   const [isFormExpanded, setIsFormExpanded] = React.useState(true)
@@ -130,8 +178,11 @@ export function RoadmapWorkspace({
     React.useState<RoadmapTaskStatusResponse | null>(null)
   const [deletingId, setDeletingId] = React.useState<string | null>(null)
 
-  // Expanded chapters state
+  // Expanded chapters & topics state
   const [collapsedChapterIds, setCollapsedChapterIds] = React.useState<
+    Record<string, boolean>
+  >({})
+  const [expandedTopicIds, setExpandedTopicIds] = React.useState<
     Record<string, boolean>
   >({})
 
@@ -217,13 +268,25 @@ export function RoadmapWorkspace({
 
   // Load selected roadmap tree
   const loadSelectedRoadmapTree = React.useCallback(
-    async (roadmapId: string) => {
-      setIsLoadingTree(true)
+    async (roadmapId: string, preserveExpandState = false) => {
+      if (!preserveExpandState) {
+        setIsLoadingTree(true)
+      }
       setTreeError(null)
+      setCompletionError(null)
       try {
         const treeData = await fetchRoadmapTree(roadmapId)
         setActiveTree(treeData)
-        setCollapsedChapterIds({})
+        if (!preserveExpandState) {
+          setCollapsedChapterIds({})
+          setExpandedTopicIds(resolveAutoExpandedTopicIds(treeData.tree))
+        } else {
+          const autoExpanded = resolveAutoExpandedTopicIds(treeData.tree)
+          setExpandedTopicIds((prev) => ({
+            ...prev,
+            ...autoExpanded,
+          }))
+        }
       } catch (err) {
         setTreeError(
           err instanceof Error
@@ -242,7 +305,7 @@ export function RoadmapWorkspace({
       setActiveTree(null)
       return
     }
-    void loadSelectedRoadmapTree(selectedRoadmapId)
+    void loadSelectedRoadmapTree(selectedRoadmapId, false)
   }, [selectedRoadmapId, loadSelectedRoadmapTree])
 
   // Poll active generation task every 1.8s
@@ -261,7 +324,7 @@ export function RoadmapWorkspace({
           await loadRoadmapsList(false)
           if (statusRes.roadmap_id) {
             setSelectedRoadmapId(statusRes.roadmap_id)
-            await loadSelectedRoadmapTree(statusRes.roadmap_id)
+            await loadSelectedRoadmapTree(statusRes.roadmap_id, false)
           }
           setTimeout(() => {
             setActiveTask((prev) =>
@@ -350,6 +413,7 @@ export function RoadmapWorkspace({
         title: trimmedTitle,
         target_date: targetDate,
         available_hours_per_day: hoursPerDay,
+        session_mode: "auto",
         study_goal: studyGoal.trim() ? studyGoal.trim() : null,
       })
 
@@ -391,10 +455,70 @@ export function RoadmapWorkspace({
     }
   }
 
+  const handleCompleteNode = async (nodeId: string) => {
+    if (!selectedRoadmapId || completingNodeId) return
+    setCompletingNodeId(nodeId)
+    setCompletionError(null)
+    try {
+      const res = await completeRoadmapNode(nodeId)
+      // Update roadmap progress in left sidebar immediately
+      setRoadmaps((prev) =>
+        prev.map((r) =>
+          r.id === selectedRoadmapId
+            ? {
+                ...r,
+                progress_percentage: res.progress_percentage,
+                status: res.roadmap_status,
+              }
+            : r
+        )
+      )
+      // Refresh tree while preserving expanded state + auto-expanding newly unlocked topic
+      await loadSelectedRoadmapTree(selectedRoadmapId, true)
+
+      // Also ensure any chapter containing a newly unlocked node is not collapsed
+      if (res.unlocked_node_ids.length > 0 && activeTree) {
+        const unlockedSet = new Set(res.unlocked_node_ids)
+        for (const ch of activeTree.tree) {
+          for (const tp of ch.children || []) {
+            if (
+              unlockedSet.has(tp.id) ||
+              (tp.children || []).some((b) => unlockedSet.has(b.id))
+            ) {
+              setCollapsedChapterIds((prev) => ({
+                ...prev,
+                [ch.id]: false,
+              }))
+              setExpandedTopicIds((prev) => ({
+                ...prev,
+                [tp.id]: true,
+              }))
+            }
+          }
+        }
+      }
+    } catch (err) {
+      setCompletionError(
+        err instanceof Error
+          ? err.message
+          : "Could not mark study block as completed."
+      )
+    } finally {
+      setCompletingNodeId(null)
+    }
+  }
+
   const toggleChapter = (chapterId: string) => {
     setCollapsedChapterIds((prev) => ({
       ...prev,
       [chapterId]: !prev[chapterId],
+    }))
+  }
+
+  const toggleTopic = (topicId: string) => {
+    setExpandedTopicIds((prev) => ({
+      ...prev,
+      [topicId]: !prev[topicId],
     }))
   }
 
@@ -404,18 +528,57 @@ export function RoadmapWorkspace({
     const set = new Set<string>()
     for (const ch of activeTree.tree) {
       if (ch.document_id) set.add(ch.document_id)
-      for (const tp of ch.children) {
+      for (const tp of ch.children || []) {
         if (tp.document_id) set.add(tp.document_id)
+        for (const blk of tp.children || []) {
+          if (blk.document_id) set.add(blk.document_id)
+        }
       }
     }
     return Array.from(set)
   }, [activeTree])
 
-  const totalTopicsCount = React.useMemo(() => {
+  // Aggregate counts for chapters, topics, and leaf study blocks
+  const treeStats = React.useMemo(() => {
+    if (!activeTree) {
+      return {
+        totalTopics: 0,
+        totalBlocks: 0,
+        completedBlocks: 0,
+      }
+    }
+    let totalTopics = 0
+    let totalBlocks = 0
+    let completedBlocks = 0
+
+    for (const ch of activeTree.tree) {
+      const topics = ch.children || []
+      totalTopics += topics.length
+      for (const tp of topics) {
+        const blocks = tp.children || []
+        if (blocks.length > 0) {
+          totalBlocks += blocks.length
+          completedBlocks += blocks.filter((b) => b.is_completed).length
+        } else {
+          // Fallback when topic itself is a leaf node
+          totalBlocks += 1
+          if (tp.is_completed) completedBlocks += 1
+        }
+      }
+    }
+
+    return {
+      totalTopics,
+      totalBlocks,
+      completedBlocks,
+    }
+  }, [activeTree])
+
+  const progressPercent = React.useMemo(() => {
     if (!activeTree) return 0
-    return activeTree.tree.reduce(
-      (sum, ch) => sum + (ch.children?.length || 0),
-      0
+    return Math.min(
+      100,
+      Math.max(0, Math.round(activeTree.roadmap.progress_percentage || 0))
     )
   }, [activeTree])
 
@@ -430,7 +593,8 @@ export function RoadmapWorkspace({
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-2xl">
               Select a subject so AI can synthesize all assigned textbooks and
-              lecture slides into a unified Chapter & Topic study roadmap.
+              lecture slides into a unified Chapter, Topic, and Study Block
+              roadmap.
             </p>
           </div>
 
@@ -729,6 +893,10 @@ export function RoadmapWorkspace({
                     const isSelected = item.id === selectedRoadmapId
                     const isDeleting = deletingId === item.id
                     const subj = subjectMap[item.subject_id]
+                    const itemPct = Math.min(
+                      100,
+                      Math.max(0, Math.round(item.progress_percentage || 0))
+                    )
 
                     return (
                       <div
@@ -748,30 +916,43 @@ export function RoadmapWorkspace({
                             : "hover:bg-slate-50 dark:hover:bg-slate-800/50"
                         }`}
                       >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
+                        <div className="min-w-0 flex-1 space-y-1.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span
+                                className={`h-2 w-2 rounded-full shrink-0 ${
+                                  item.status === "completed" || itemPct >= 100
+                                    ? "bg-emerald-500"
+                                    : item.status === "active"
+                                    ? "bg-[#0A77FF]"
+                                    : item.status === "failed"
+                                    ? "bg-rose-500"
+                                    : "bg-[#0A77FF] animate-pulse"
+                                }`}
+                              />
+                              <p
+                                className={`text-xs font-semibold truncate ${
+                                  isSelected
+                                    ? "text-[#0A77FF] dark:text-sky-300"
+                                    : "text-slate-900 dark:text-white"
+                                }`}
+                              >
+                                {item.title}
+                              </p>
+                            </div>
+
                             <span
-                              className={`h-2 w-2 rounded-full shrink-0 ${
-                                item.status === "active" ||
-                                item.status === "completed"
-                                  ? "bg-emerald-500"
-                                  : item.status === "failed"
-                                  ? "bg-rose-500"
-                                  : "bg-[#0A77FF] animate-pulse"
-                              }`}
-                            />
-                            <p
-                              className={`text-xs font-semibold truncate ${
-                                isSelected
-                                  ? "text-[#0A77FF] dark:text-sky-300"
-                                  : "text-slate-900 dark:text-white"
+                              className={`text-[11px] font-mono font-semibold tabular-nums shrink-0 ${
+                                itemPct >= 100
+                                  ? "text-emerald-600 dark:text-emerald-400"
+                                  : "text-slate-500 dark:text-slate-400"
                               }`}
                             >
-                              {item.title}
-                            </p>
+                              {itemPct}%
+                            </span>
                           </div>
 
-                          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums mt-1 pl-4 truncate">
+                          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums pl-4 truncate">
                             {subj && (
                               <>
                                 <span className="font-sans font-medium text-slate-500 dark:text-slate-400">
@@ -783,6 +964,20 @@ export function RoadmapWorkspace({
                             <span>Due: {formatShortDate(item.target_date)}</span>
                             <span>·</span>
                             <span>{item.available_hours_per_day}h/day</span>
+                          </div>
+
+                          {/* Mini Progress Bar */}
+                          <div className="pl-4">
+                            <div className="h-1 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                              <div
+                                style={{ width: `${itemPct}%` }}
+                                className={`h-full transition-all duration-300 ${
+                                  itemPct >= 100
+                                    ? "bg-emerald-500"
+                                    : "bg-[#0A77FF]"
+                                }`}
+                              />
+                            </div>
                           </div>
                         </div>
 
@@ -808,7 +1003,7 @@ export function RoadmapWorkspace({
             </section>
           </div>
 
-          {/* RIGHT COLUMN (7 cols): Live Pipeline Status + Multi-Doc Curriculum Outline Viewer */}
+          {/* RIGHT COLUMN (7 cols): Live Pipeline Status + 3-Tier Curriculum & Study Blocks Viewer */}
           <div className="lg:col-span-7 space-y-4">
             {/* Active AI Generation Progress Banner */}
             {activeTask && (
@@ -874,8 +1069,8 @@ export function RoadmapWorkspace({
                 </h3>
                 <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto leading-relaxed">
                   All PDF documents assigned to a subject will be synthesized by
-                  AI into a unified Chapter and Topic outline with direct links
-                  to the exact document and page range.
+                  AI into a 3-tier Chapter, Topic, and Study Block outline with
+                  direct links to the exact document and page range.
                 </p>
               </div>
             ) : (
@@ -888,6 +1083,12 @@ export function RoadmapWorkspace({
                         {subjectMap[activeTree.roadmap.subject_id] && (
                           <span className="rounded-md bg-[#0A77FF]/10 dark:bg-[#0A77FF]/20 px-2 py-0.5 text-[11px] font-semibold text-[#0A77FF] dark:text-sky-300">
                             {subjectMap[activeTree.roadmap.subject_id].name}
+                          </span>
+                        )}
+                        {progressPercent >= 100 && (
+                          <span className="rounded-md bg-emerald-500/10 dark:bg-emerald-500/20 px-2 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1">
+                            <CheckCircle2 className="h-3 w-3" />
+                            <span>Completed</span>
                           </span>
                         )}
                         <span className="text-xs font-mono text-slate-400 tabular-nums">
@@ -916,6 +1117,30 @@ export function RoadmapWorkspace({
                     )}
                   </div>
 
+                  {/* Overall Study Block Progress Bar */}
+                  <div className="space-y-1.5 pt-0.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-slate-600 dark:text-slate-300 flex items-center gap-1.5">
+                        <Layers className="h-3.5 w-3.5 text-[#0A77FF]" />
+                        <span>Study Block Progress</span>
+                      </span>
+                      <span className="font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
+                        {treeStats.completedBlocks} / {treeStats.totalBlocks}{" "}
+                        blocks ({progressPercent}%)
+                      </span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                      <div
+                        style={{ width: `${progressPercent}%` }}
+                        className={`h-full transition-all duration-300 ${
+                          progressPercent >= 100
+                            ? "bg-emerald-500"
+                            : "bg-[#0A77FF]"
+                        }`}
+                      />
+                    </div>
+                  </div>
+
                   {/* Single Aggregated Telemetry Strip (Tabular Nums) */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
                     <div className="rounded-xl bg-slate-50 dark:bg-slate-950/70 border border-slate-200/60 dark:border-slate-800/80 px-3 py-2">
@@ -923,10 +1148,8 @@ export function RoadmapWorkspace({
                         Curriculum Structure
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {activeTree.tree.length}{" "}
-                        {activeTree.tree.length === 1 ? "chapter" : "chapters"}{" "}
-                        · {totalTopicsCount}{" "}
-                        {totalTopicsCount === 1 ? "topic" : "topics"}
+                        {activeTree.tree.length} ch · {treeStats.totalTopics} tp{" "}
+                        · {treeStats.totalBlocks} blk
                       </span>
                     </div>
 
@@ -957,9 +1180,16 @@ export function RoadmapWorkspace({
                       </span>
                     </div>
                   </div>
+
+                  {completionError && (
+                    <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 px-3.5 py-2.5 text-xs text-rose-600 dark:text-rose-400 flex items-start gap-2">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                      <span>{completionError}</span>
+                    </div>
+                  )}
                 </div>
 
-                {/* Hierarchical Chapters -> Topics Accordion List */}
+                {/* Hierarchical 3-Tier Chapters -> Topics -> Study Blocks Accordion List */}
                 {activeTree.tree.length === 0 ? (
                   <div className="p-10 text-center space-y-2">
                     <Loader2 className="h-5 w-5 animate-spin text-[#0A77FF] mx-auto" />
@@ -1007,6 +1237,9 @@ export function RoadmapWorkspace({
                                   <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                                     {chapter.title}
                                   </h3>
+                                  {chapter.is_completed && (
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                  )}
                                 </div>
 
                                 {chapter.description && (
@@ -1068,7 +1301,7 @@ export function RoadmapWorkspace({
 
                           {/* Level 2: Topics List inside Chapter */}
                           {!isCollapsed && topics.length > 0 && (
-                            <div className="bg-slate-50/60 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800/60 px-5 py-2.5 space-y-2">
+                            <div className="bg-slate-50/60 dark:bg-slate-950/50 border-t border-slate-100 dark:border-slate-800/60 px-5 py-3 space-y-2.5">
                               {topics.map((topic, topicIdx) => {
                                 const topicMinutes = computeTopicMinutes(topic)
                                 const docId =
@@ -1078,71 +1311,366 @@ export function RoadmapWorkspace({
                                 const topicDocTitle = docId
                                   ? documentTitleMap[docId]
                                   : null
+                                const studyBlocks = topic.children || []
+                                const hasBlocks = studyBlocks.length > 0
+                                const isTopicExpanded = Boolean(
+                                  expandedTopicIds[topic.id]
+                                )
+                                const completedBlocksInTopic =
+                                  studyBlocks.filter((b) => b.is_completed)
+                                    .length
+                                const hasActiveBlockInTopic = studyBlocks.some(
+                                  (b) => b.is_unlocked && !b.is_completed
+                                )
 
                                 return (
                                   <div
                                     key={topic.id}
-                                    className="rounded-xl border border-slate-200/70 dark:border-slate-800/80 bg-white dark:bg-slate-900 px-4 py-3 flex items-center justify-between gap-3 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+                                    className={`rounded-xl border transition-colors overflow-hidden ${
+                                      hasActiveBlockInTopic
+                                        ? "border-[#0A77FF]/35 bg-white dark:bg-slate-900 shadow-2xs"
+                                        : "border-slate-200/70 dark:border-slate-800/80 bg-white dark:bg-slate-900"
+                                    }`}
                                   >
-                                    <div className="min-w-0 flex-1 space-y-0.5">
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-[11px] font-mono font-semibold text-slate-400 dark:text-slate-500 tabular-nums shrink-0">
-                                          {chapterIdx + 1}.{topicIdx + 1}
-                                        </span>
-                                        <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
-                                          {topic.title}
-                                        </h4>
-                                      </div>
-
-                                      {topic.description && (
-                                        <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 pl-6">
-                                          {topic.description}
-                                        </p>
-                                      )}
-
-                                      <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums pl-6 pt-0.5">
-                                        {topicDocTitle && (
-                                          <>
-                                            <span className="font-sans text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
-                                              {topicDocTitle}
-                                            </span>
-                                            <span>·</span>
-                                          </>
+                                    {/* Topic Header Row */}
+                                    <div className="px-4 py-3 flex items-center justify-between gap-3">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          hasBlocks && toggleTopic(topic.id)
+                                        }
+                                        className={`flex items-start gap-2.5 min-w-0 flex-1 text-left focus-visible:outline-none ${
+                                          hasBlocks
+                                            ? "cursor-pointer"
+                                            : "cursor-default"
+                                        }`}
+                                      >
+                                        {hasBlocks && (
+                                          <span className="mt-0.5 h-5 w-5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 flex items-center justify-center shrink-0">
+                                            {isTopicExpanded ? (
+                                              <ChevronDown className="h-3 w-3 stroke-[2]" />
+                                            ) : (
+                                              <ChevronRight className="h-3 w-3 stroke-[2]" />
+                                            )}
+                                          </span>
                                         )}
-                                        {topic.target_page_start &&
-                                          topic.target_page_end && (
-                                            <span>
-                                              Pages {topic.target_page_start}–
-                                              {topic.target_page_end}
+
+                                        <div className="min-w-0 flex-1 space-y-0.5">
+                                          <div className="flex items-center gap-2 flex-wrap">
+                                            <span className="text-[11px] font-mono font-semibold text-slate-400 dark:text-slate-500 tabular-nums shrink-0">
+                                              {chapterIdx + 1}.{topicIdx + 1}
                                             </span>
+                                            <h4 className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
+                                              {topic.title}
+                                            </h4>
+                                            {topic.is_completed ? (
+                                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 dark:bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                                <CheckCircle2 className="h-2.5 w-2.5" />
+                                                <span>Done</span>
+                                              </span>
+                                            ) : hasActiveBlockInTopic ? (
+                                              <span className="inline-flex items-center gap-1 rounded-md bg-[#0A77FF]/10 dark:bg-[#0A77FF]/20 px-1.5 py-0.5 text-[10px] font-semibold text-[#0A77FF] dark:text-sky-300">
+                                                <span>In Progress</span>
+                                              </span>
+                                            ) : !topic.is_unlocked ? (
+                                              <Lock className="h-3 w-3 text-slate-400 shrink-0" />
+                                            ) : null}
+                                          </div>
+
+                                          {topic.description && (
+                                            <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">
+                                              {topic.description}
+                                            </p>
                                           )}
-                                        {topicMinutes > 0 && (
-                                          <>
-                                            <span>·</span>
+
+                                          <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums pt-0.5">
+                                            {topicDocTitle && (
+                                              <>
+                                                <span className="font-sans text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
+                                                  {topicDocTitle}
+                                                </span>
+                                                <span>·</span>
+                                              </>
+                                            )}
+                                            {topic.target_page_start &&
+                                              topic.target_page_end && (
+                                                <span>
+                                                  Pages {topic.target_page_start}–
+                                                  {topic.target_page_end}
+                                                </span>
+                                              )}
+                                            {topicMinutes > 0 && (
+                                              <>
+                                                <span>·</span>
+                                                <span>
+                                                  Est. {topicMinutes} min
+                                                </span>
+                                              </>
+                                            )}
+                                            {hasBlocks && (
+                                              <>
+                                                <span>·</span>
+                                                <span
+                                                  className={
+                                                    completedBlocksInTopic ===
+                                                    studyBlocks.length
+                                                      ? "text-emerald-600 dark:text-emerald-400 font-semibold"
+                                                      : "text-slate-600 dark:text-slate-300 font-semibold"
+                                                  }
+                                                >
+                                                  {completedBlocksInTopic}/
+                                                  {studyBlocks.length} blocks
+                                                </span>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </button>
+
+                                      {/* Topic Right Actions */}
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        {hasBlocks ? (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              toggleTopic(topic.id)
+                                            }
+                                            className="h-7 px-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-[11px] font-mono font-medium text-slate-600 dark:text-slate-300 inline-flex items-center gap-1 transition-colors cursor-pointer tabular-nums"
+                                          >
                                             <span>
-                                              Est. {topicMinutes} min
+                                              {isTopicExpanded
+                                                ? "Hide blocks"
+                                                : `View ${studyBlocks.length} ${
+                                                    studyBlocks.length === 1
+                                                      ? "block"
+                                                      : "blocks"
+                                                  }`}
                                             </span>
+                                          </button>
+                                        ) : (
+                                          // Fallback when Topic has no child Study Blocks (2-tier legacy tree)
+                                          <>
+                                            {docId &&
+                                              topic.target_page_start &&
+                                              (topic.is_unlocked ||
+                                                topic.is_completed) && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() =>
+                                                    onOpenDocumentAtPage(
+                                                      docId,
+                                                      topic.target_page_start!
+                                                    )
+                                                  }
+                                                  className="h-7 px-2.5 rounded-lg bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 active:scale-[0.97] tabular-nums"
+                                                >
+                                                  <span>
+                                                    Read p.
+                                                    {topic.target_page_start}
+                                                  </span>
+                                                  <ArrowUpRight className="h-3 w-3" />
+                                                </button>
+                                              )}
+                                            {topic.is_unlocked &&
+                                              !topic.is_completed && (
+                                                <button
+                                                  type="button"
+                                                  disabled={
+                                                    completingNodeId ===
+                                                    topic.id
+                                                  }
+                                                  onClick={() =>
+                                                    void handleCompleteNode(
+                                                      topic.id
+                                                    )
+                                                  }
+                                                  className="h-7 px-2.5 rounded-lg bg-[#0A77FF] hover:bg-[#0866DF] disabled:opacity-50 text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 active:scale-[0.97]"
+                                                >
+                                                  {completingNodeId ===
+                                                  topic.id ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                  ) : (
+                                                    <Check className="h-3 w-3 stroke-[2.2]" />
+                                                  )}
+                                                  <span>Complete</span>
+                                                </button>
+                                              )}
                                           </>
                                         )}
                                       </div>
                                     </div>
 
-                                    {docId && topic.target_page_start && (
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          onOpenDocumentAtPage(
-                                            docId,
-                                            topic.target_page_start!
-                                          )
-                                        }
-                                        className="h-7 px-2.5 rounded-lg bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 text-[11px] font-medium inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0 active:scale-[0.97] tabular-nums"
-                                      >
-                                        <span>
-                                          Read p.{topic.target_page_start}
-                                        </span>
-                                        <ArrowUpRight className="h-3 w-3" />
-                                      </button>
+                                    {/* Level 3: Study Blocks Vertical Stepper inside Topic */}
+                                    {hasBlocks && isTopicExpanded && (
+                                      <div className="border-t border-slate-100 dark:border-slate-800/70 bg-slate-50/50 dark:bg-slate-950/60 px-4 py-3">
+                                        <div className="border-l-2 border-slate-200 dark:border-slate-800 ml-2.5 pl-3.5 space-y-2">
+                                          {studyBlocks.map(
+                                            (block, blockIdx) => {
+                                              const blockDocId =
+                                                block.document_id ||
+                                                topic.document_id ||
+                                                chapter.document_id ||
+                                                activeTreeDocIds[0]
+                                              const blockDocTitle = blockDocId
+                                                ? documentTitleMap[blockDocId]
+                                                : null
+                                              const isCompleted =
+                                                block.is_completed
+                                              const isUnlocked =
+                                                block.is_unlocked &&
+                                                !block.is_completed
+                                              const isLocked =
+                                                !block.is_unlocked &&
+                                                !block.is_completed
+                                              const isCompleting =
+                                                completingNodeId === block.id
+
+                                              return (
+                                                <div
+                                                  key={block.id}
+                                                  className={`rounded-xl border px-3.5 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-colors ${
+                                                    isUnlocked
+                                                      ? "border-[#0A77FF]/40 bg-[#0A77FF]/[0.04] dark:bg-[#0A77FF]/10"
+                                                      : isCompleted
+                                                      ? "border-emerald-200/70 dark:border-emerald-900/40 bg-white dark:bg-slate-900"
+                                                      : "border-slate-200/60 dark:border-slate-800/60 bg-slate-100/60 dark:bg-slate-900/40 opacity-65"
+                                                  }`}
+                                                >
+                                                  <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                                                    <span className="mt-0.5 shrink-0">
+                                                      {isCompleted ? (
+                                                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                                      ) : isUnlocked ? (
+                                                        <PlayCircle className="h-4 w-4 text-[#0A77FF] dark:text-sky-400" />
+                                                      ) : (
+                                                        <Lock className="h-3.5 w-3.5 text-slate-400 mt-0.5" />
+                                                      )}
+                                                    </span>
+
+                                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                                      <div className="flex items-center gap-2 flex-wrap">
+                                                        <span className="text-[11px] font-mono font-semibold text-slate-400 dark:text-slate-500 tabular-nums">
+                                                          Block {blockIdx + 1}
+                                                        </span>
+                                                        <p className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                                                          {block.title}
+                                                        </p>
+                                                        {isUnlocked && (
+                                                          <span className="rounded bg-[#0A77FF] px-1.5 py-0.2 text-[10px] font-semibold text-white">
+                                                            Current Session
+                                                          </span>
+                                                        )}
+                                                      </div>
+
+                                                      {block.description && (
+                                                        <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-1">
+                                                          {block.description}
+                                                        </p>
+                                                      )}
+
+                                                      <div className="flex items-center gap-2 flex-wrap text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums">
+                                                        {blockDocTitle && (
+                                                          <>
+                                                            <span className="font-sans text-slate-500 dark:text-slate-400 truncate max-w-[180px]">
+                                                              {blockDocTitle}
+                                                            </span>
+                                                            <span>·</span>
+                                                          </>
+                                                        )}
+                                                        {block.target_page_start &&
+                                                          block.target_page_end && (
+                                                            <span>
+                                                              Pages{" "}
+                                                              {
+                                                                block.target_page_start
+                                                              }
+                                                              –
+                                                              {
+                                                                block.target_page_end
+                                                              }
+                                                            </span>
+                                                          )}
+                                                        <span>·</span>
+                                                        <span>
+                                                          {block.estimated_minutes ||
+                                                            25}{" "}
+                                                          min
+                                                        </span>
+                                                        {isLocked && (
+                                                          <>
+                                                            <span>·</span>
+                                                            <span className="font-sans text-slate-400">
+                                                              Complete previous
+                                                              block to unlock
+                                                            </span>
+                                                          </>
+                                                        )}
+                                                      </div>
+                                                    </div>
+                                                  </div>
+
+                                                  {/* Study Block Actions */}
+                                                  <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                                                    {blockDocId &&
+                                                      block.target_page_start &&
+                                                      (isUnlocked ||
+                                                        isCompleted) && (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() =>
+                                                            onOpenDocumentAtPage(
+                                                              blockDocId,
+                                                              block.target_page_start!
+                                                            )
+                                                          }
+                                                          className={`h-7 px-2.5 rounded-lg text-[11px] font-mono font-medium inline-flex items-center gap-1 transition-colors cursor-pointer active:scale-[0.97] tabular-nums ${
+                                                            isUnlocked
+                                                              ? "bg-[#0A77FF]/10 hover:bg-[#0A77FF]/18 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300"
+                                                              : "border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300"
+                                                          }`}
+                                                        >
+                                                          <span>
+                                                            {isCompleted
+                                                              ? `Review p.${block.target_page_start}`
+                                                              : `Read p.${block.target_page_start}`}
+                                                          </span>
+                                                          <ArrowUpRight className="h-3 w-3" />
+                                                        </button>
+                                                      )}
+
+                                                    {isUnlocked && (
+                                                      <button
+                                                        type="button"
+                                                        disabled={isCompleting}
+                                                        onClick={() =>
+                                                          void handleCompleteNode(
+                                                            block.id
+                                                          )
+                                                        }
+                                                        className="h-7 px-2.5 rounded-lg bg-[#0A77FF] hover:bg-[#0866DF] disabled:opacity-50 text-white text-[11px] font-semibold inline-flex items-center gap-1 transition-colors cursor-pointer active:scale-[0.97]"
+                                                      >
+                                                        {isCompleting ? (
+                                                          <Loader2 className="h-3 w-3 animate-spin" />
+                                                        ) : (
+                                                          <Check className="h-3 w-3 stroke-[2.2]" />
+                                                        )}
+                                                        <span>Complete</span>
+                                                      </button>
+                                                    )}
+
+                                                    {isCompleted && (
+                                                      <span className="h-7 px-2 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold inline-flex items-center gap-1">
+                                                        <Check className="h-3 w-3 stroke-[2.2]" />
+                                                        <span>Done</span>
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              )
+                                            }
+                                          )}
+                                        </div>
+                                      </div>
                                     )}
                                   </div>
                                 )
