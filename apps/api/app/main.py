@@ -10,6 +10,7 @@ from app.modules.auth import auth_router
 from app.modules.chat import chat_router
 from app.modules.documents import documents_router, ingestion_service, subjects_router
 from app.modules.roadmaps import roadmaps_router
+from app.modules.study_sessions import study_sessions_router
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ app.include_router(subjects_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(roadmaps_router, prefix="/api/v1")
+app.include_router(study_sessions_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])
