@@ -87,7 +87,7 @@ class RoadmapGenerateRequest(BaseModel):
     document_id: uuid.UUID | None = None
     title: str = Field(min_length=2, max_length=255)
     target_date: date
-    available_hours_per_day: float = Field(default=2.0, ge=0.5, le=12.0)
+    available_hours_per_day: float = Field(default=2.0, ge=0.25, le=12.0)
     session_mode: StudySessionMode = Field(
         default=StudySessionMode.AUTO,
         description="Chế độ phân bổ Study Blocks: auto, micro (15-30p), deep_work (45-90p)",

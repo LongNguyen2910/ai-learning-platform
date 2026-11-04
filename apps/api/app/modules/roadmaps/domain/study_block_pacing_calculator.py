@@ -25,7 +25,7 @@ class StudyBlockPacingCalculator:
     POMODORO_BLOCK_MINUTES: int = 25
     MINUTES_PER_PAGE_BY_COMPLEXITY: ClassVar[dict[int, int]] = {1: 5, 2: 7, 3: 10}
     MAX_STUDY_HORIZON_DAYS: int = 366
-    MIN_STUDY_HOURS_PER_DAY: float = 0.5
+    MIN_STUDY_HOURS_PER_DAY: float = 0.25
     MAX_STUDY_HOURS_PER_DAY: float = 12.0
 
     def calculate_available_minutes(
@@ -49,7 +49,7 @@ class StudyBlockPacingCalculator:
                 f"available_hours_per_day must be between {self.MIN_STUDY_HOURS_PER_DAY} and {self.MAX_STUDY_HOURS_PER_DAY}."
             )
 
-        return int(total_days * hours_per_day * 60)
+        return int(round(total_days * hours_per_day * 60))
 
     def allocate(
         self,
