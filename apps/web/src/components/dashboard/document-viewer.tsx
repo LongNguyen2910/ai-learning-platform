@@ -44,6 +44,7 @@ interface DocumentViewerProps {
   document: DocumentItem
   initialPageJump?: { page: number; nonce: number } | null
   onBack: () => void
+  backLabel?: string
   onCacheBlobUrl?: (documentId: string, blobUrl: string) => void
   onOpenRoadmapGenerator?: (doc: DocumentItem) => void
 }
@@ -58,6 +59,7 @@ export function DocumentViewer({
   document,
   initialPageJump,
   onBack,
+  backLabel,
   onCacheBlobUrl,
   onOpenRoadmapGenerator,
 }: DocumentViewerProps) {
@@ -265,7 +267,7 @@ export function DocumentViewer({
             className="h-8 px-2.5 rounded-lg border border-slate-200/80 dark:border-slate-800 bg-white hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 active:scale-[0.98]"
           >
             <ArrowLeft className="h-3.5 w-3.5 stroke-[2]" />
-            <span>Back</span>
+            <span>{backLabel || "Back"}</span>
           </button>
 
           <div className="min-w-0 flex items-center gap-2">

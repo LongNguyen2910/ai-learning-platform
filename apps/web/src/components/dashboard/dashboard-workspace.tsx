@@ -43,6 +43,8 @@ export function DashboardWorkspace() {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [activeSection, setActiveSection] =
     React.useState<SidebarSection>("documents")
+  const [returnSection, setReturnSection] =
+    React.useState<SidebarSection>("documents")
   const [documents, setDocuments] = React.useState<DocumentItem[]>([])
   const [subjects, setSubjects] = React.useState<SubjectItem[]>([])
   const [isLoadingDocs, setIsLoadingDocs] = React.useState(true)
@@ -167,6 +169,7 @@ export function DashboardWorkspace() {
   }, [])
 
   const handleSelectDocument = React.useCallback((doc: DocumentItem) => {
+    setReturnSection("documents")
     setActiveSection("documents")
     setSelectedDocId(doc.document_id)
     setLastOpenedDocId(doc.document_id)
@@ -174,6 +177,7 @@ export function DashboardWorkspace() {
 
   const handleOpenDocumentAtPage = React.useCallback(
     (documentId: string, pageNumber = 1) => {
+      setReturnSection("roadmap")
       setActiveSection("documents")
       setSelectedDocId(documentId)
       setLastOpenedDocId(documentId)
@@ -184,6 +188,11 @@ export function DashboardWorkspace() {
     },
     []
   )
+
+  const handleBackFromViewer = React.useCallback(() => {
+    setSelectedDocId(null)
+    setActiveSection(returnSection)
+  }, [returnSection])
 
   const handleCreateSubject = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -336,8 +345,14 @@ export function DashboardWorkspace() {
         collapsed={sidebarCollapsed}
         activeSection={activeSection}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-        onSelectSection={(sec) => setActiveSection(sec)}
-        onSelectDocumentsRoot={() => setSelectedDocId(null)}
+        onSelectSection={(sec) => {
+          setActiveSection(sec)
+          setReturnSection(sec)
+        }}
+        onSelectDocumentsRoot={() => {
+          setSelectedDocId(null)
+          setReturnSection("documents")
+        }}
       />
 
       {/* Right Main Area: Top Header + Dynamic Workspace */}
@@ -349,10 +364,8 @@ export function DashboardWorkspace() {
               ? activeDocument?.title ?? null
               : null
           }
-          onBackToDocuments={() => {
-            setActiveSection("documents")
-            setSelectedDocId(null)
-          }}
+          returnSection={returnSection}
+          onBackToDocuments={handleBackFromViewer}
         />
 
         {/* Keep DocumentViewer mounted when returning to document list or Roadmap to eliminate PDF reload lag */}
@@ -367,12 +380,18 @@ export function DashboardWorkspace() {
             <DocumentViewer
               document={cachedViewerDocument}
               initialPageJump={initialPageJump}
-              onBack={() => setSelectedDocId(null)}
+              onBack={handleBackFromViewer}
+              backLabel={
+                returnSection === "roadmap"
+                  ? "Back to Roadmap"
+                  : "Back to Documents"
+              }
               onCacheBlobUrl={handleCacheBlobUrl}
               onOpenRoadmapGenerator={(doc) => {
                 if (doc.subject_id) {
                   setPreselectedRoadmapSubjectId(doc.subject_id)
                 }
+                setReturnSection("roadmap")
                 setActiveSection("roadmap")
               }}
             />
@@ -396,6 +415,7 @@ export function DashboardWorkspace() {
               if (filterSubjId) {
                 setLibraryFilter(filterSubjId)
               }
+              setReturnSection("documents")
               setActiveSection("documents")
               setSelectedDocId(null)
             }}
@@ -466,6 +486,7 @@ export function DashboardWorkspace() {
                       type="button"
                       onClick={() => {
                         setPreselectedRoadmapSubjectId(selectedFilterSubject.id)
+                        setReturnSection("roadmap")
                         setActiveSection("roadmap")
                       }}
                       className="h-8 px-3 rounded-lg bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer active:scale-[0.97]"

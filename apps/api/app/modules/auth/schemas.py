@@ -17,6 +17,23 @@ class UserLoginRequest(BaseModel):
     password: str
 
 
+class UserUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, max_length=100)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8, max_length=72)
+
+
+class DeleteAccountRequest(BaseModel):
+    current_password: str
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

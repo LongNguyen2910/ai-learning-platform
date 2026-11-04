@@ -10,10 +10,13 @@ from app.modules.auth.exceptions import (
 )
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
+    ChangePasswordRequest,
+    DeleteAccountRequest,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 from app.modules.auth.security import PasswordHasher, TokenManager
 
@@ -75,6 +78,37 @@ class AuthService:
         self, db: AsyncSession, user_id: UUID
     ) -> User | None:
         return await db.scalar(select(User).where(User.id == user_id))
+
+    async def update_profile(
+        self, db: AsyncSession, user: User, req: UserUpdateRequest
+    ) -> User:
+        user.full_name = req.full_name.strip() if req.full_name else None
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user
+
+    async def change_password(
+        self, db: AsyncSession, user: User, req: ChangePasswordRequest
+    ) -> None:
+        if not PasswordHasher.verify(req.current_password, user.hashed_password):
+            raise InvalidCredentialsException("Current password is incorrect.")
+
+        if req.current_password == req.new_password:
+            raise ValueError("New password must be different from current password.")
+
+        user.hashed_password = PasswordHasher.hash(req.new_password)
+        db.add(user)
+        await db.commit()
+
+    async def delete_account(
+        self, db: AsyncSession, user: User, req: DeleteAccountRequest
+    ) -> None:
+        if not PasswordHasher.verify(req.current_password, user.hashed_password):
+            raise InvalidCredentialsException("Current password is incorrect.")
+
+        await db.delete(user)
+        await db.commit()
 
 
 auth_service = AuthService()

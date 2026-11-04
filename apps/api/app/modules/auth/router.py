@@ -12,10 +12,14 @@ from app.modules.auth.exceptions import (
 )
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
+    ChangePasswordRequest,
+    DeleteAccountRequest,
+    MessageResponse,
     TokenResponse,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
+    UserUpdateRequest,
 )
 from app.modules.auth.service import auth_service
 
@@ -76,3 +80,65 @@ async def get_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@router.patch(
+    "/me",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update current user profile information",
+)
+async def update_me(
+    req: UserUpdateRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    updated = await auth_service.update_profile(db, current_user, req)
+    return UserResponse.model_validate(updated)
+
+
+@router.post(
+    "/change-password",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Change user password with current password verification",
+)
+async def change_password(
+    req: ChangePasswordRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    try:
+        await auth_service.change_password(db, current_user, req)
+        return MessageResponse(message="Password updated successfully.")
+    except InvalidCredentialsException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.delete(
+    "/account",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently delete user account and all cascaded data",
+)
+async def delete_account(
+    req: DeleteAccountRequest,
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MessageResponse:
+    try:
+        await auth_service.delete_account(db, current_user, req)
+        return MessageResponse(message="Account permanently deleted.")
+    except InvalidCredentialsException as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
