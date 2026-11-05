@@ -4,10 +4,10 @@ Quản lý System Prompts, State Engine 3 phase (suggest -> roleplay -> evaluate
 và parser Feynman Rubric theo docs/REVERSE_TUTORING_DESIGN.md.
 """
 
-from collections.abc import Sequence
 import json
 import logging
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from app.modules.chat.models import ChatMessage

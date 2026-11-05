@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.modules.auth import auth_router
 from app.modules.chat import chat_router
 from app.modules.documents import documents_router, ingestion_service, subjects_router
+from app.modules.flashcards import flashcards_router
 from app.modules.quizzes import quizzes_router
 from app.modules.roadmaps import roadmaps_router
 
@@ -56,6 +57,7 @@ app.include_router(documents_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")
 app.include_router(roadmaps_router, prefix="/api/v1")
 app.include_router(quizzes_router, prefix="/api/v1")
+app.include_router(flashcards_router, prefix="/api/v1")
 
 
 @app.get("/health", tags=["Health"])
