@@ -71,6 +71,15 @@ class ChatMessage(Base):
     )
     sender: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    mode: Mapped[str] = mapped_column(
+        String(50), default="standard", server_default=text("'standard'"), nullable=False
+    )
+    mode_metadata: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+        nullable=False,
+    )
     socratic_tier: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     citations: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,

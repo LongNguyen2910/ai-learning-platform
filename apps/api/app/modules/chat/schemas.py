@@ -76,6 +76,8 @@ class ChatMessageResponse(BaseModel):
     session_id: uuid.UUID
     sender: Literal["user", "assistant"]
     content: str
+    mode: str = "standard"
+    mode_metadata: dict[str, Any] = Field(default_factory=dict)
     socratic_tier: int
     citations: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime | None = None
@@ -87,6 +89,10 @@ class ChatRequest(BaseModel):
         min_length=1,
         max_length=4000,
         description="Nội dung tin nhắn của học viên",
+    )
+    mode: Literal["standard", "socratic", "reverse_tutoring"] = Field(
+        default="standard",
+        description="Chế độ hội thoại",
     )
     socratic_enabled: bool = Field(
         default=False,
@@ -107,9 +113,19 @@ class ChatRequest(BaseModel):
         ge=1,
         description="Giới hạn truy vấn RAG theo trang PDF đang xem (tùy chọn)",
     )
+    # Reverse Tutoring fields
+    reverse_action: Literal["suggest_topics", "start_session", "continue", "evaluate"] | None = Field(
+        default=None,
+        description="Hành động điều khiển phiên Đảo vai",
+    )
+    target_concept: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Chủ đề hoặc khái niệm học viên muốn giảng giải",
+    )
 
 
-ChatMode = Literal["socratic", "normal", "refusal"]
+ChatMode = Literal["socratic", "normal", "refusal", "reverse_tutoring"]
 
 
 class SSEStreamEvent(BaseModel):
