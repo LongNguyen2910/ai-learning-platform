@@ -374,3 +374,22 @@ def test_fr13_roadmap_generate_request_accepts_session_mode():
         session_mode=StudySessionMode.DEEP_WORK,
     )
     assert req.session_mode == StudySessionMode.DEEP_WORK
+
+
+def test_fractional_minute_pacing_precision():
+    """Calculator computes exact minutes without float truncation loss."""
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 11, 1)
+    target_1_day = today + timedelta(days=1)
+    target_10_days = today + timedelta(days=10)
+
+    # 15 min / day = 0.25h
+    assert calc.calculate_available_minutes(target_1_day, today, 0.25) == 15
+    assert calc.calculate_available_minutes(target_10_days, today, 0.25) == 150
+
+    # 45 min / day = 0.75h
+    assert calc.calculate_available_minutes(target_1_day, today, 0.75) == 45
+
+    # 20 min / day = 0.3333h (rounded float from client)
+    assert calc.calculate_available_minutes(target_1_day, today, 0.3333) == 20
+

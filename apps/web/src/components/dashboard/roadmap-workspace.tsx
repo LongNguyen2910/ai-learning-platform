@@ -132,7 +132,24 @@ function resolveAutoExpandedTopicIds(
   return expanded
 }
 
-const HOUR_PRESETS = [1.0, 2.0, 3.0, 4.0]
+export function formatStudyHours(hours: number): string {
+  if (!hours || hours <= 0) return "0m / ngày"
+  const totalMins = Math.round(hours * 60)
+  const h = Math.floor(totalMins / 60)
+  const m = totalMins % 60
+  if (h > 0 && m > 0) return `${h}h ${m}m / ngày`
+  if (h > 0) return `${h}h / ngày`
+  return `${m}m / ngày`
+}
+
+const TIME_PRESETS = [
+  { label: "15m", h: 0, m: 15 },
+  { label: "30m", h: 0, m: 30 },
+  { label: "45m", h: 0, m: 45 },
+  { label: "1h", h: 1, m: 0 },
+  { label: "1.5h", h: 1, m: 30 },
+  { label: "2h", h: 2, m: 0 },
+]
 
 export function RoadmapWorkspace({
   documents,
@@ -168,7 +185,36 @@ export function RoadmapWorkspace({
   const [todayTimestamp, setTodayTimestamp] = React.useState<number | null>(
     null
   )
-  const [hoursPerDay, setHoursPerDay] = React.useState<number>(2.0)
+  const [studyHours, setStudyHours] = React.useState<number>(2)
+  const [studyMinutes, setStudyMinutes] = React.useState<number>(0)
+  const hoursPerDay = React.useMemo(() => {
+    return Number(((studyHours * 60 + studyMinutes) / 60).toFixed(4))
+  }, [studyHours, studyMinutes])
+
+  const handleHoursChange = (val: number) => {
+    const clampedH = Math.min(12, Math.max(0, isNaN(val) ? 0 : val))
+    setStudyHours(clampedH)
+    if (clampedH === 12 && studyMinutes > 0) {
+      setStudyMinutes(0)
+    }
+    setFormError(null)
+  }
+
+  const handleMinutesChange = (val: number) => {
+    const clampedM = Math.min(59, Math.max(0, isNaN(val) ? 0 : val))
+    if (studyHours === 12) {
+      setStudyMinutes(0)
+    } else {
+      setStudyMinutes(clampedM)
+    }
+    setFormError(null)
+  }
+
+  const handleSetPreset = (h: number, m: number) => {
+    setStudyHours(h)
+    setStudyMinutes(m)
+    setFormError(null)
+  }
   const [studyGoal, setStudyGoal] = React.useState<string>("")
   const [formError, setFormError] = React.useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = React.useState(false)
@@ -355,14 +401,14 @@ export function RoadmapWorkspace({
       (target.getTime() - todayTimestamp) / (1000 * 60 * 60 * 24)
     )
     if (diffDays <= 0) return null
-    const totalHours = Math.round(diffDays * hoursPerDay * 10) / 10
-    const totalMinutes = Math.round(totalHours * 60)
+    const totalMinutes = Math.round(diffDays * (studyHours * 60 + studyMinutes))
+    const totalHours = Math.round((totalMinutes / 60) * 10) / 10
     return {
       days: diffDays,
       totalHours,
       totalMinutes,
     }
-  }, [targetDate, hoursPerDay, todayTimestamp])
+  }, [targetDate, studyHours, studyMinutes, todayTimestamp])
 
   const handleSubjectSelectChange = (subjId: string) => {
     setSelectedSubjectId(subjId)
@@ -402,6 +448,16 @@ export function RoadmapWorkspace({
 
     if (!timeBudgetStats || timeBudgetStats.days <= 0) {
       setFormError("Target completion date must be in the future.")
+      return
+    }
+
+    const totalDailyMinutes = studyHours * 60 + studyMinutes
+    if (totalDailyMinutes < 15) {
+      setFormError("Thời gian học tối thiểu mỗi ngày là 15 phút.")
+      return
+    }
+    if (totalDailyMinutes > 720) {
+      setFormError("Thời gian học tối đa mỗi ngày là 12 tiếng.")
       return
     }
 
@@ -736,46 +792,69 @@ export function RoadmapWorkspace({
                     </div>
 
                     <div className="space-y-1.5">
-                      <label
-                        htmlFor="roadmap-hours-input"
-                        className="block text-xs font-medium text-slate-700 dark:text-slate-300"
-                      >
-                        Study Hours / Day
-                      </label>
+                      <div className="flex items-center justify-between">
+                        <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+                          Study Time / Day
+                        </label>
+                        <span className="text-[11px] font-mono text-[#0A77FF] dark:text-sky-400 font-semibold">
+                          {formatStudyHours(hoursPerDay)}
+                        </span>
+                      </div>
                       <div className="flex items-center gap-1.5">
-                        <input
-                          id="roadmap-hours-input"
-                          type="number"
-                          step="0.5"
-                          min="0.5"
-                          max="12"
-                          required
-                          value={hoursPerDay}
-                          onChange={(e) =>
-                            setHoursPerDay(
-                              Math.min(
-                                12,
-                                Math.max(0.5, Number(e.target.value) || 0.5)
+                        <div className="flex items-center gap-1 h-9 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 px-2 shrink-0">
+                          <input
+                            id="roadmap-timer-hours"
+                            type="number"
+                            min="0"
+                            max="12"
+                            value={studyHours}
+                            onChange={(e) =>
+                              handleHoursChange(
+                                e.target.value === "" ? 0 : Number(e.target.value)
                               )
+                            }
+                            className="w-8 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
+                            aria-label="Hours"
+                          />
+                          <span className="text-[11px] font-mono text-slate-400">h</span>
+                          <span className="text-slate-300 dark:text-slate-600 font-bold">:</span>
+                          <input
+                            id="roadmap-timer-minutes"
+                            type="number"
+                            min="0"
+                            max="59"
+                            step="1"
+                            value={studyMinutes}
+                            onChange={(e) =>
+                              handleMinutesChange(
+                                e.target.value === "" ? 0 : Number(e.target.value)
+                              )
+                            }
+                            className="w-8 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
+                            aria-label="Minutes"
+                          />
+                          <span className="text-[11px] font-mono text-slate-400">m</span>
+                        </div>
+
+                        <div className="flex items-center gap-1 flex-1 overflow-x-auto">
+                          {TIME_PRESETS.map((preset) => {
+                            const isSelected =
+                              studyHours === preset.h && studyMinutes === preset.m
+                            return (
+                              <button
+                                key={preset.label}
+                                type="button"
+                                onClick={() => handleSetPreset(preset.h, preset.m)}
+                                className={`flex-1 h-9 min-w-[34px] rounded-lg text-[11px] font-mono font-medium transition-colors cursor-pointer tabular-nums ${
+                                  isSelected
+                                    ? "bg-[#0A77FF]/12 text-[#0A77FF] dark:bg-[#0A77FF]/25 dark:text-sky-300 border border-[#0A77FF]/30 font-semibold"
+                                    : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:bg-slate-200/70"
+                                }`}
+                              >
+                                {preset.label}
+                              </button>
                             )
-                          }
-                          className="w-18 h-9 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 px-2.5 text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
-                        />
-                        <div className="flex items-center gap-1 flex-1">
-                          {HOUR_PRESETS.map((preset) => (
-                            <button
-                              key={preset}
-                              type="button"
-                              onClick={() => setHoursPerDay(preset)}
-                              className={`flex-1 h-9 rounded-lg text-[11px] font-mono font-medium transition-colors cursor-pointer tabular-nums ${
-                                hoursPerDay === preset
-                                  ? "bg-[#0A77FF]/12 text-[#0A77FF] dark:bg-[#0A77FF]/25 dark:text-sky-300 border border-[#0A77FF]/30 font-semibold"
-                                  : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:bg-slate-200/70"
-                              }`}
-                            >
-                              {preset}h
-                            </button>
-                          ))}
+                          })}
                         </div>
                       </div>
                     </div>
@@ -963,7 +1042,7 @@ export function RoadmapWorkspace({
                             )}
                             <span>Due: {formatShortDate(item.target_date)}</span>
                             <span>·</span>
-                            <span>{item.available_hours_per_day}h/day</span>
+                            <span>{formatStudyHours(item.available_hours_per_day)}</span>
                           </div>
 
                           {/* Mini Progress Bar */}
@@ -1167,7 +1246,7 @@ export function RoadmapWorkspace({
                         Daily Pace
                       </span>
                       <span className="text-sm font-mono font-semibold text-slate-900 dark:text-white tabular-nums">
-                        {activeTree.roadmap.available_hours_per_day} hrs / day
+                        {formatStudyHours(activeTree.roadmap.available_hours_per_day)}
                       </span>
                     </div>
 

@@ -255,3 +255,33 @@ def test_endpoint_rejects_completing_archived_roadmap(auth_client: TestClient, s
         resp = auth_client.post(f"/api/v1/roadmaps/nodes/{b1_id}/complete")
         assert resp.status_code == 400
         assert "archived" in resp.json()["detail"].lower()
+
+
+def test_schema_and_pacing_accept_15_minutes_daily():
+    """He thong cho phep muc hoc toi thieu 15 phut (0.25h) moi ngay."""
+    calc = StudyBlockPacingCalculator()
+    today = date(2026, 10, 28)
+    target = today + timedelta(days=10)
+    minutes = calc.calculate_available_minutes(target, today, 0.25)
+    assert minutes == 150  # 10 days * 15 min = 150 min
+
+    req = RoadmapGenerateRequest(
+        subject_id=uuid.uuid4(),
+        document_id=uuid.uuid4(),
+        title="15 min daily",
+        target_date=target,
+        available_hours_per_day=0.25,
+    )
+    assert req.available_hours_per_day == 0.25
+
+
+def test_schema_rejects_under_15_minutes():
+    """He thong tu choi thoi gian hoc < 15 phut (< 0.25h)."""
+    with pytest.raises(ValidationError):
+        RoadmapGenerateRequest(
+            subject_id=uuid.uuid4(),
+            document_id=uuid.uuid4(),
+            title="Too short",
+            target_date=date.today() + timedelta(days=5),
+            available_hours_per_day=0.2,
+        )
