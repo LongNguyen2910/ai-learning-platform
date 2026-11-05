@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -43,19 +43,15 @@ class Quiz(Base):
         ForeignKey("documents.id", ondelete="CASCADE"),
         nullable=False,
     )
-    subject_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("subjects.id", ondelete="SET NULL"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    is_interleaved: Mapped[bool] = mapped_column(
-        Boolean, default=False, nullable=False
-    )
+    is_interleaved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     total_questions: Mapped[int] = mapped_column(Integer, nullable=False)
-    time_limit_minutes: Mapped[int] = mapped_column(
-        Integer, default=15, nullable=False
-    )
+    time_limit_minutes: Mapped[int] = mapped_column(Integer, default=15, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -64,16 +60,14 @@ class Quiz(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="quizzes")
-    document: Mapped["Document"] = relationship(
-        "Document", back_populates="quizzes"
-    )
+    document: Mapped["Document"] = relationship("Document", back_populates="quizzes")
     subject: Mapped[Optional["Subject"]] = relationship(
         "Subject", back_populates="quizzes"
     )
-    questions: Mapped[List["QuizQuestion"]] = relationship(
+    questions: Mapped[list["QuizQuestion"]] = relationship(
         "QuizQuestion", back_populates="quiz", cascade="all, delete-orphan"
     )
-    attempts: Mapped[List["QuizAttempt"]] = relationship(
+    attempts: Mapped[list["QuizAttempt"]] = relationship(
         "QuizAttempt", back_populates="quiz", cascade="all, delete-orphan"
     )
 
@@ -94,22 +88,20 @@ class QuizQuestion(Base):
     )
     question_text: Mapped[str] = mapped_column(Text, nullable=False)
     bloom_level: Mapped[str] = mapped_column(String(30), nullable=False)
-    options: Mapped[List[Dict[str, Any]]] = mapped_column(
+    options: Mapped[list[dict[str, Any]]] = mapped_column(
         JSONB,
         nullable=False,
     )
     correct_option: Mapped[str] = mapped_column(String(5), nullable=False)
-    explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    target_page: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    topic_tag: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    topic_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    __table_args__ = (
-        Index("idx_quiz_questions_quiz_id", "quiz_id"),
-    )
+    __table_args__ = (Index("idx_quiz_questions_quiz_id", "quiz_id"),)
 
     # Relationships
     quiz: Mapped["Quiz"] = relationship("Quiz", back_populates="questions")
-    answers: Mapped[List["QuizAttemptAnswer"]] = relationship(
+    answers: Mapped[list["QuizAttemptAnswer"]] = relationship(
         "QuizAttemptAnswer",
         back_populates="question",
         cascade="all, delete-orphan",
@@ -152,7 +144,7 @@ class QuizAttempt(Base):
     # Relationships
     quiz: Mapped["Quiz"] = relationship("Quiz", back_populates="attempts")
     user: Mapped["User"] = relationship("User", back_populates="quiz_attempts")
-    answers: Mapped[List["QuizAttemptAnswer"]] = relationship(
+    answers: Mapped[list["QuizAttemptAnswer"]] = relationship(
         "QuizAttemptAnswer",
         back_populates="attempt",
         cascade="all, delete-orphan",
