@@ -800,63 +800,72 @@ export function RoadmapWorkspace({
                           {formatStudyHours(hoursPerDay)}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <div className="flex items-center gap-1 h-9 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 px-2 shrink-0">
-                          <input
-                            id="roadmap-timer-hours"
-                            type="number"
-                            min="0"
-                            max="12"
-                            value={studyHours}
-                            onChange={(e) =>
-                              handleHoursChange(
-                                e.target.value === "" ? 0 : Number(e.target.value)
-                              )
-                            }
-                            className="w-8 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
-                            aria-label="Hours"
-                          />
-                          <span className="text-[11px] font-mono text-slate-400">h</span>
-                          <span className="text-slate-300 dark:text-slate-600 font-bold">:</span>
-                          <input
-                            id="roadmap-timer-minutes"
-                            type="number"
-                            min="0"
-                            max="59"
-                            step="1"
-                            value={studyMinutes}
-                            onChange={(e) =>
-                              handleMinutesChange(
-                                e.target.value === "" ? 0 : Number(e.target.value)
-                              )
-                            }
-                            className="w-8 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
-                            aria-label="Minutes"
-                          />
-                          <span className="text-[11px] font-mono text-slate-400">m</span>
-                        </div>
-
-                        <div className="flex items-center gap-1 flex-1 overflow-x-auto">
-                          {TIME_PRESETS.map((preset) => {
-                            const isSelected =
-                              studyHours === preset.h && studyMinutes === preset.m
-                            return (
-                              <button
-                                key={preset.label}
-                                type="button"
-                                onClick={() => handleSetPreset(preset.h, preset.m)}
-                                className={`flex-1 h-9 min-w-[34px] rounded-lg text-[11px] font-mono font-medium transition-colors cursor-pointer tabular-nums ${
-                                  isSelected
-                                    ? "bg-[#0A77FF]/12 text-[#0A77FF] dark:bg-[#0A77FF]/25 dark:text-sky-300 border border-[#0A77FF]/30 font-semibold"
-                                    : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:bg-slate-200/70"
-                                }`}
-                              >
-                                {preset.label}
-                              </button>
+                      <div className="flex items-center justify-center gap-1.5 h-9 w-full rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950 px-3">
+                        <input
+                          id="roadmap-timer-hours"
+                          type="number"
+                          min="0"
+                          max="12"
+                          value={studyHours}
+                          onChange={(e) =>
+                            handleHoursChange(
+                              e.target.value === "" ? 0 : Number(e.target.value)
                             )
-                          })}
-                        </div>
+                          }
+                          className="w-10 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
+                          aria-label="Hours"
+                        />
+                        <span className="text-xs font-mono text-slate-400">h</span>
+                        <span className="text-slate-300 dark:text-slate-600 font-bold px-1">:</span>
+                        <input
+                          id="roadmap-timer-minutes"
+                          type="number"
+                          min="0"
+                          max="59"
+                          step="1"
+                          value={studyMinutes}
+                          onChange={(e) =>
+                            handleMinutesChange(
+                              e.target.value === "" ? 0 : Number(e.target.value)
+                            )
+                          }
+                          className="w-10 text-center text-xs font-mono font-semibold text-slate-900 dark:text-slate-100 bg-transparent focus:outline-none tabular-nums"
+                          aria-label="Minutes"
+                        />
+                        <span className="text-xs font-mono text-slate-400">m</span>
                       </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Preset Buttons Row */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        Quick Presets
+                      </span>
+                      <span className="text-[11px] font-mono text-slate-400 dark:text-slate-500">
+                        Pace shortcuts
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-6 gap-1.5 sm:gap-2">
+                      {TIME_PRESETS.map((preset) => {
+                        const isSelected =
+                          studyHours === preset.h && studyMinutes === preset.m
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => handleSetPreset(preset.h, preset.m)}
+                            className={`h-8 sm:h-9 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer tabular-nums flex items-center justify-center ${
+                              isSelected
+                                ? "bg-[#0A77FF]/12 text-[#0A77FF] dark:bg-[#0A77FF]/25 dark:text-sky-300 border border-[#0A77FF]/40 font-semibold shadow-xs"
+                                : "bg-slate-100 dark:bg-slate-800/80 text-slate-600 dark:text-slate-400 hover:bg-slate-200/70 dark:hover:bg-slate-800 border border-transparent"
+                            }`}
+                          >
+                            {preset.label}
+                          </button>
+                        )
+                      })}
                     </div>
                   </div>
 
