@@ -98,13 +98,24 @@ class FakeRepository:
         return [m for m in self.messages if m.session_id == session_id][-limit:]
 
     async def add_message(
-        self, session_id, sender, content, socratic_tier=0, citations=None, token_count=0
+        self,
+        session_id,
+        sender,
+        content,
+        socratic_tier=0,
+        citations=None,
+        token_count=0,
+        mode="standard",
+        mode_metadata=None,
+        **kwargs,
     ):
         msg = SimpleNamespace(
             id=uuid.uuid4(),
             session_id=session_id,
             sender=sender,
             content=content,
+            mode=mode,
+            mode_metadata=mode_metadata or {},
             socratic_tier=socratic_tier,
             citations=citations or [],
             token_count=token_count,

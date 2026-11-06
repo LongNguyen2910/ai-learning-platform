@@ -47,7 +47,7 @@ class Settings(BaseSettings):
 
     # Gemini
     GEMINI_API_KEY: str | None = None
-    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
     EMBEDDING_MODEL: str = "gemini-embedding-001"
     EMBEDDING_DIMENSION: int = 3072
 

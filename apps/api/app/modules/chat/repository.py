@@ -115,12 +115,16 @@ class ChatRepository:
         socratic_tier: int = 0,
         citations: list[dict[str, Any]] | None = None,
         token_count: int = 0,
+        mode: str = "standard",
+        mode_metadata: dict[str, Any] | None = None,
     ) -> ChatMessage:
         async with self.session_factory() as db:
             message = ChatMessage(
                 session_id=session_id,
                 sender=sender,
                 content=content,
+                mode=mode,
+                mode_metadata=mode_metadata or {},
                 socratic_tier=socratic_tier,
                 citations=citations or [],
                 token_count=token_count,

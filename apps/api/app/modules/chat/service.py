@@ -22,6 +22,11 @@ from app.modules.chat.repository import (
     ChatRepository,
     chat_repository,
 )
+from app.modules.chat.reverse_tutoring import (
+    compose_reverse_tutoring_prompt,
+    determine_reverse_state,
+    parse_rubric_metadata,
+)
 from app.modules.chat.schemas import (
     ChatMode,
     ChatRequest,
@@ -233,6 +238,153 @@ class SocraticChatService:
 
     # ------------------------------------------------------------------- stream
 
+    async def _stream_reverse_tutoring(
+        self,
+        session: ChatSession,
+        request: ChatRequest,
+        guard: GuardrailResult,
+        history: list[ChatMessage],
+        prev_tier: int,
+        guardrail_meta: dict[str, Any],
+    ) -> AsyncIterator[str]:
+        phase, turn_count, target_concept = determine_reverse_state(request, history)
+
+        await self.repository.add_message(
+            session_id=session.id,
+            sender=SENDER_USER,
+            content=request.content,
+            socratic_tier=0,
+            token_count=_estimate_tokens(request.content),
+            mode="reverse_tutoring",
+            mode_metadata={
+                "reverse_phase": phase,
+                "turn_count": turn_count,
+                "target_concept": target_concept,
+            },
+        )
+
+        # Retrieval query
+        if phase == "suggest":
+            retrieval_query = (
+                request.content
+                if len(request.content) > 10
+                else "các khái niệm định lý trọng tâm"
+            )
+        elif target_concept:
+            retrieval_query = f"{target_concept}\n{request.content}"[:MAX_RETRIEVAL_QUERY_CHARS]
+        else:
+            retrieval_query = request.content[:MAX_RETRIEVAL_QUERY_CHARS]
+
+        chunks = await self._retrieve(
+            str(session.document_id), retrieval_query, request.page_number
+        )
+
+        system_prompt = compose_reverse_tutoring_prompt(
+            phase=phase,
+            target_concept=target_concept,
+            chunks=chunks,
+            jailbreak_detected=guard.is_jailbreak,
+        )
+
+        yield _sse(
+            "meta",
+            {
+                "session_id": str(session.id),
+                "mode": "reverse_tutoring",
+                "reverse_phase": phase,
+                "turn_count": turn_count,
+                "target_concept": target_concept,
+                "previous_tier": prev_tier,
+                "socratic_tier": 0,
+                **guardrail_meta,
+            },
+        )
+        yield _sse(
+            "citations",
+            {
+                "chunks": [
+                    {
+                        "chunk_id": c.chunk_id,
+                        "page_number": c.page_number,
+                        "score": c.score,
+                        "citation_tag": c.citation_tag,
+                        "content": c.content,
+                        "has_formula": c.has_formula,
+                        "has_image": c.has_image,
+                    }
+                    for c in chunks
+                ]
+            },
+        )
+
+        parts: list[str] = []
+        try:
+            async for piece in self.llm_client.stream(
+                system_prompt=system_prompt,
+                history=self.to_chat_turns(history),
+                user_message=request.content,
+            ):
+                parts.append(piece)
+                yield _sse("token", {"text": piece})
+        except Exception:
+            logger.exception("LLM streaming failed for session_id=%s", session.id)
+            yield _sse(
+                "error",
+                {
+                    "message": "AI Đảo vai đang tạm thời gián đoạn kết nối. "
+                    "Bạn vui lòng gửi lại tin nhắn sau ít giây nhé!"
+                },
+            )
+            return
+
+        answer = "".join(parts).strip()
+        cited = [
+            {
+                "chunk_id": c.chunk_id,
+                "page_number": c.page_number,
+                "score": c.score,
+                "citation_tag": c.citation_tag,
+                "content": c.content,
+                "has_formula": c.has_formula,
+                "has_image": c.has_image,
+            }
+            for c in chunks
+            if c.citation_tag in answer or f"Trang {c.page_number}" in answer
+        ]
+
+        mode_metadata: dict[str, Any] = {
+            "reverse_phase": phase,
+            "turn_count": turn_count,
+            "target_concept": target_concept,
+        }
+        if phase == "evaluate":
+            rubric = parse_rubric_metadata(answer)
+            if rubric:
+                mode_metadata["rubric"] = rubric
+
+        saved = await self.repository.add_message(
+            session_id=session.id,
+            sender=SENDER_ASSISTANT,
+            content=answer,
+            socratic_tier=0,
+            citations=cited,
+            token_count=_estimate_tokens(answer),
+            mode="reverse_tutoring",
+            mode_metadata=mode_metadata,
+        )
+        yield _sse(
+            "done",
+            {
+                "message_id": str(saved.id),
+                "mode": "reverse_tutoring",
+                "reverse_phase": phase,
+                "turn_count": turn_count,
+                "target_concept": target_concept,
+                "citations": cited,
+                "rubric": mode_metadata.get("rubric"),
+            },
+        )
+
     async def stream_reply(
         self, session: ChatSession, request: ChatRequest
     ) -> AsyncIterator[str]:
@@ -242,21 +394,44 @@ class SocraticChatService:
         )
         prev_tier = self.previous_tier(history)
 
+        guardrail_meta = {
+            "homework_detected": guard.is_homework or guard.is_exam_structure,
+            "jailbreak_detected": guard.is_jailbreak,
+        }
+
+        # --- Chế độ Reverse Tutoring (FR-11) --------------------------------------
+        if request.mode == "reverse_tutoring":
+            async for sse_event in self._stream_reverse_tutoring(
+                session=session,
+                request=request,
+                guard=guard,
+                history=history,
+                prev_tier=prev_tier,
+                guardrail_meta=guardrail_meta,
+            ):
+                yield sse_event
+            return
+
+        saved_user_mode = (
+            "socratic"
+            if request.socratic_enabled or request.mode == "socratic"
+            else "standard"
+        )
         await self.repository.add_message(
             session_id=session.id,
             sender=SENDER_USER,
             content=request.content,
             socratic_tier=0,
             token_count=_estimate_tokens(request.content),
+            mode=saved_user_mode,
         )
 
-        guardrail_meta = {
-            "homework_detected": guard.is_homework or guard.is_exam_structure,
-            "jailbreak_detected": guard.is_jailbreak,
-        }
-
         # --- Toggle OFF + homework/jailbreak: từ chối tức thì, 0 LLM token -------
-        if not request.socratic_enabled and guard.should_block_direct_answer:
+        if (
+            not request.socratic_enabled
+            and request.mode != "socratic"
+            and guard.should_block_direct_answer
+        ):
             refusal = (
                 JAILBREAK_REFUSAL_MESSAGE
                 if guard.is_jailbreak and not guard.is_homework
@@ -279,6 +454,7 @@ class SocraticChatService:
                 content=refusal,
                 socratic_tier=0,
                 token_count=0,
+                mode="refusal",
             )
             yield _sse(
                 "done",
@@ -287,7 +463,7 @@ class SocraticChatService:
             return
 
         # --- Xác định chế độ & tầng ----------------------------------------------
-        if request.socratic_enabled:
+        if request.socratic_enabled or request.mode == "socratic":
             mode: ChatMode = "socratic"
             tier, is_new_question = self.decide_tier(request, guard, prev_tier)
         else:
@@ -390,6 +566,7 @@ class SocraticChatService:
             socratic_tier=next_tier,
             citations=cited,
             token_count=_estimate_tokens(answer),
+            mode=mode,
         )
         yield _sse(
             "done",
