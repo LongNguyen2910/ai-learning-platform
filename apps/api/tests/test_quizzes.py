@@ -619,3 +619,72 @@ def test_api_unauthorized():
             json={"document_id": str(uuid.uuid4()), "num_questions": 5},
         )
         assert response.status_code == 401
+
+
+def test_api_list_quizzes_success(
+    client_with_user, mock_user: User, sample_payload: GeneratedQuizPayload
+):
+    client, _ = client_with_user
+    doc_id = uuid.uuid4()
+    quiz_id = uuid.uuid4()
+
+    fake_quiz = Quiz(
+        id=quiz_id,
+        user_id=mock_user.id,
+        document_id=doc_id,
+        title="Trắc nghiệm Danh sách AI",
+        total_questions=3,
+        time_limit_minutes=15,
+        created_at=datetime.now(UTC),
+    )
+    fake_quiz.questions = [
+        QuizQuestion(
+            id=uuid.uuid4(),
+            quiz_id=fake_quiz.id,
+            question_text=q.question_text,
+            bloom_level=q.bloom_level.value,
+            options=[opt.model_dump() for opt in q.options],
+            correct_option=q.correct_option,
+            explanation=q.explanation,
+            target_page=q.target_page,
+            topic_tag=q.topic_tag,
+        )
+        for q in sample_payload.questions
+    ]
+
+    with patch.object(
+        quiz_service, "list_user_quizzes", new_callable=AsyncMock
+    ) as mock_list:
+        mock_list.return_value = [fake_quiz]
+
+        response = client.get("/api/v1/quizzes")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["id"] == str(quiz_id)
+        assert data[0]["title"] == "Trắc nghiệm Danh sách AI"
+
+
+def test_api_delete_quiz_success(client_with_user):
+    client, _ = client_with_user
+    quiz_id = uuid.uuid4()
+
+    with patch.object(
+        quiz_service, "delete_quiz", new_callable=AsyncMock
+    ) as mock_del:
+        mock_del.return_value = None
+
+        response = client.delete(f"/api/v1/quizzes/{quiz_id}")
+        assert response.status_code == 204
+
+
+def test_api_delete_quiz_not_found(client_with_user):
+    client, _ = client_with_user
+    quiz_id = uuid.uuid4()
+
+    with patch.object(
+        quiz_service, "delete_quiz", side_effect=QuizNotFoundError(quiz_id)
+    ):
+        response = client.delete(f"/api/v1/quizzes/{quiz_id}")
+        assert response.status_code == 404
+        assert str(quiz_id) in response.json()["detail"]

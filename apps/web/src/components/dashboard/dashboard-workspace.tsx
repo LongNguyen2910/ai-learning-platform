@@ -11,6 +11,7 @@ import { DocumentUploadZone } from "@/components/dashboard/document-upload-zone"
 import { DocumentList } from "@/components/dashboard/document-list"
 import { DocumentViewer } from "@/components/dashboard/document-viewer"
 import { RoadmapWorkspace } from "@/components/dashboard/roadmap-workspace"
+import { QuizWorkspace } from "@/components/dashboard/quiz-workspace"
 import {
   fetchDocuments,
   deleteDocument,
@@ -38,6 +39,11 @@ import {
 
 export type LibraryFilterMode = "all" | "uncategorized" | string
 
+const ACTIVE_SECTION_STORAGE_KEY = "ai_learning_active_section"
+
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? React.useLayoutEffect : React.useEffect
+
 export function DashboardWorkspace() {
   const router = useRouter()
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
@@ -45,6 +51,35 @@ export function DashboardWorkspace() {
     React.useState<SidebarSection>("documents")
   const [returnSection, setReturnSection] =
     React.useState<SidebarSection>("documents")
+  const [hasHydratedSection, setHasHydratedSection] = React.useState(false)
+
+  // Restore active sidebar tab synchronously before paint across page reloads (F5)
+  useIsomorphicLayoutEffect(() => {
+    try {
+      const saved = localStorage.getItem(ACTIVE_SECTION_STORAGE_KEY)
+      if (
+        saved === "documents" ||
+        saved === "roadmap" ||
+        saved === "quizzes"
+      ) {
+        setActiveSection(saved)
+        setReturnSection(saved)
+      }
+    } catch {
+      // Ignore storage errors
+    } finally {
+      setHasHydratedSection(true)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    if (!hasHydratedSection) return
+    try {
+      localStorage.setItem(ACTIVE_SECTION_STORAGE_KEY, activeSection)
+    } catch {
+      // Ignore storage errors
+    }
+  }, [activeSection, hasHydratedSection])
   const [documents, setDocuments] = React.useState<DocumentItem[]>([])
   const [subjects, setSubjects] = React.useState<SubjectItem[]>([])
   const [isLoadingDocs, setIsLoadingDocs] = React.useState(true)
@@ -176,8 +211,12 @@ export function DashboardWorkspace() {
   }, [])
 
   const handleOpenDocumentAtPage = React.useCallback(
-    (documentId: string, pageNumber = 1) => {
-      setReturnSection("roadmap")
+    (
+      documentId: string,
+      pageNumber = 1,
+      originSection: SidebarSection = "roadmap"
+    ) => {
+      setReturnSection(originSection)
       setActiveSection("documents")
       setSelectedDocId(documentId)
       setLastOpenedDocId(documentId)
@@ -343,7 +382,7 @@ export function DashboardWorkspace() {
       {/* Left Vertical Collapsible Menu */}
       <AppSidebar
         collapsed={sidebarCollapsed}
-        activeSection={activeSection}
+        activeSection={hasHydratedSection ? activeSection : undefined}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
         onSelectSection={(sec) => {
           setActiveSection(sec)
@@ -358,9 +397,9 @@ export function DashboardWorkspace() {
       {/* Right Main Area: Top Header + Dynamic Workspace */}
       <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
         <TopHeader
-          activeSection={activeSection}
+          activeSection={hasHydratedSection ? activeSection : undefined}
           activeDocumentTitle={
-            activeSection === "documents"
+            hasHydratedSection && activeSection === "documents"
               ? activeDocument?.title ?? null
               : null
           }
@@ -368,11 +407,15 @@ export function DashboardWorkspace() {
           onBackToDocuments={handleBackFromViewer}
         />
 
-        {/* Keep DocumentViewer mounted when returning to document list or Roadmap to eliminate PDF reload lag */}
+        {!hasHydratedSection && (
+          <div className="flex-1 bg-[#F8FAFC] dark:bg-slate-950" />
+        )}
+
+        {/* Keep DocumentViewer mounted when returning to document list, Roadmap, or Quizzes to eliminate PDF reload lag */}
         {cachedViewerDocument && (
           <main
             className={
-              isShowingReader
+              hasHydratedSection && isShowingReader
                 ? "flex-1 min-h-0 overflow-hidden flex flex-col"
                 : "hidden"
             }
@@ -384,7 +427,9 @@ export function DashboardWorkspace() {
               backLabel={
                 returnSection === "roadmap"
                   ? "Back to Roadmap"
-                  : "Back to Documents"
+                  : returnSection === "quizzes"
+                    ? "Back to Quizzes"
+                    : "Back to Documents"
               }
               onCacheBlobUrl={handleCacheBlobUrl}
               onOpenRoadmapGenerator={(doc) => {
@@ -401,7 +446,7 @@ export function DashboardWorkspace() {
         {/* Roadmap Generator & Outline Workspace */}
         <main
           className={
-            activeSection === "roadmap"
+            hasHydratedSection && activeSection === "roadmap"
               ? "flex-1 min-h-0 overflow-hidden flex flex-col"
               : "hidden"
           }
@@ -410,7 +455,9 @@ export function DashboardWorkspace() {
             documents={documents}
             subjects={subjects}
             preselectedSubjectId={preselectedRoadmapSubjectId}
-            onOpenDocumentAtPage={handleOpenDocumentAtPage}
+            onOpenDocumentAtPage={(docId, page) =>
+              handleOpenDocumentAtPage(docId, page, "roadmap")
+            }
             onSwitchToDocuments={(filterSubjId) => {
               if (filterSubjId) {
                 setLibraryFilter(filterSubjId)
@@ -422,10 +469,34 @@ export function DashboardWorkspace() {
           />
         </main>
 
+        {/* Quizzes & Assessment Workspace */}
+        <main
+          className={
+            hasHydratedSection && activeSection === "quizzes"
+              ? "flex-1 min-h-0 overflow-hidden flex flex-col"
+              : "hidden"
+          }
+        >
+          <QuizWorkspace
+            documents={documents}
+            subjects={subjects}
+            onOpenDocumentAtPage={(docId, page) =>
+              handleOpenDocumentAtPage(docId, page, "quizzes")
+            }
+            onSwitchToDocuments={() => {
+              setReturnSection("documents")
+              setActiveSection("documents")
+              setSelectedDocId(null)
+            }}
+          />
+        </main>
+
         {/* Documents Library Workspace */}
         <main
           className={
-            activeSection === "documents" && !activeDocument
+            hasHydratedSection &&
+            activeSection === "documents" &&
+            !activeDocument
               ? "flex-1 overflow-y-auto overflow-x-hidden px-6 py-8"
               : "hidden"
           }

@@ -13,10 +13,10 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export type SidebarSection = "documents" | "roadmap"
+export type SidebarSection = "documents" | "roadmap" | "quizzes"
 
 interface NavItem {
-  id: SidebarSection | "flashcards" | "quizzes"
+  id: SidebarSection | "flashcards"
   label: string
   icon: React.ComponentType<{ className?: string }>
   badge?: string
@@ -35,16 +35,14 @@ const NAV_ITEMS: NavItem[] = [
     icon: Network,
   },
   {
-    id: "flashcards",
-    label: "Flashcards",
-    icon: Layers,
-    badge: "Soon",
-    disabled: true,
-  },
-  {
     id: "quizzes",
     label: "Quizzes",
     icon: Target,
+  },
+  {
+    id: "flashcards",
+    label: "Flashcards",
+    icon: Layers,
     badge: "Soon",
     disabled: true,
   },
@@ -60,7 +58,7 @@ interface AppSidebarProps {
 
 export function AppSidebar({
   collapsed,
-  activeSection = "documents",
+  activeSection,
   onToggleCollapse,
   onSelectSection,
   onSelectDocumentsRoot,
@@ -154,6 +152,8 @@ export function AppSidebar({
                   onSelectDocumentsRoot?.()
                 } else if (item.id === "roadmap") {
                   onSelectSection?.("roadmap")
+                } else if (item.id === "quizzes") {
+                  onSelectSection?.("quizzes")
                 }
               }}
               title={collapsed ? item.label : undefined}

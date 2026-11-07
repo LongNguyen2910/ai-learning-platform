@@ -10,6 +10,7 @@ import {
   FileText,
   ChevronRight,
   Network,
+  Target,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
 import type { SidebarSection } from "@/components/dashboard/app-sidebar"
@@ -29,14 +30,14 @@ interface TopHeaderProps {
 }
 
 export function TopHeader({
-  activeSection = "documents",
+  activeSection,
   activeDocumentTitle,
   returnSection = "documents",
   onBackToDocuments,
 }: TopHeaderProps) {
   const router = useRouter()
   const [menuOpen, setMenuOpen] = React.useState(false)
-  const [noticeMessage, setNoticeMessage] = React.useState<string | null>(null)
+  const [noticeMessage] = React.useState<string | null>(null)
   const [currentUser, setCurrentUser] = React.useState<AuthUser | null>(null)
   const dropdownRef = React.useRef<HTMLDivElement>(null)
 
@@ -131,10 +132,17 @@ export function TopHeader({
     <header className="h-16 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm px-6 flex items-center justify-between shrink-0 z-20">
       {/* Left: Context Breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
-        {activeSection === "roadmap" && !activeDocumentTitle ? (
+        {!activeSection && !activeDocumentTitle ? (
+          <div className="h-6" />
+        ) : activeSection === "roadmap" && !activeDocumentTitle ? (
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
             <Network className="h-4 w-4 text-[#0A77FF] shrink-0" />
             <span>Roadmap</span>
+          </div>
+        ) : activeSection === "quizzes" && !activeDocumentTitle ? (
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
+            <Target className="h-4 w-4 text-[#0A77FF] shrink-0" />
+            <span>Quizzes</span>
           </div>
         ) : (
           <>
@@ -151,6 +159,11 @@ export function TopHeader({
                 <>
                   <Network className="h-4 w-4 text-[#0A77FF] shrink-0" />
                   <span>Roadmap</span>
+                </>
+              ) : returnSection === "quizzes" && activeDocumentTitle ? (
+                <>
+                  <Target className="h-4 w-4 text-[#0A77FF] shrink-0" />
+                  <span>Quizzes</span>
                 </>
               ) : (
                 <>
