@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -7,11 +8,21 @@ from app.core.database import get_db
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
 from app.modules.quizzes.exceptions import (
+    DocumentNotFoundError,
+    DocumentNotReadyError,
+    GeminiGenerationError,
     InsufficientQuestionsError,
+    InvalidPageRangeError,
     QuizNotFoundError,
 )
-from app.modules.quizzes.schemas import QuizCreateRequest, QuizResponse
-from app.modules.quizzes.service import QuizService
+from app.modules.quizzes.schemas import (
+    QuizCreateRequest,
+    QuizGenerateRequest,
+    QuizResponse,
+)
+from app.modules.quizzes.service import quiz_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
 
@@ -28,15 +39,60 @@ async def create_quiz(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QuizResponse:
-    service = QuizService(db)
     try:
-        quiz = await service.create_interleaved_quiz(current_user.id, payload)
+        quiz = await quiz_service.create_interleaved_quiz(
+            user_id=current_user.id,
+            payload=payload,
+            db=db,
+        )
         return QuizResponse.model_validate(quiz)
     except InsufficientQuestionsError as err:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(err),
         ) from err
+
+
+@router.post(
+    "/generate",
+    response_model=QuizResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Sinh bộ câu hỏi trắc nghiệm tự động từ tài liệu bằng Gemini",
+)
+async def generate_quiz(
+    request: QuizGenerateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizResponse:
+    """Sinh bộ câu hỏi trắc nghiệm chuẩn Bloom và lưu trực tiếp vào cơ sở dữ liệu."""
+    try:
+        quiz = await quiz_service.generate_quiz(
+            db=db,
+            user_id=current_user.id,
+            request=request,
+        )
+        return QuizResponse.model_validate(quiz)
+    except DocumentNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except DocumentNotReadyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    except InvalidPageRangeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except GeminiGenerationError as exc:
+        logger.error("Error generating quiz: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get(
@@ -50,12 +106,16 @@ async def get_quiz(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> QuizResponse:
-    service = QuizService(db)
+    """Lấy thông tin chi tiết của một bộ quiz theo ID thuộc sở hữu của người dùng hiện tại."""
     try:
-        quiz = await service.get_quiz(current_user.id, quiz_id)
+        quiz = await quiz_service.get_quiz_by_id(
+            db=db,
+            quiz_id=quiz_id,
+            user_id=current_user.id,
+        )
         return QuizResponse.model_validate(quiz)
-    except QuizNotFoundError as err:
+    except QuizNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=str(err),
-        ) from err
+            detail=str(exc),
+        ) from exc

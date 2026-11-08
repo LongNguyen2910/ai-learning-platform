@@ -71,8 +71,3 @@ async def health_check():
         "qdrant_url": settings.QDRANT_URL,
         "redis_url": settings.REDIS_URL,
     }
-
-
-@app.get("/", tags=["Root"])
-async def root():
-    return {"message": "Welcome to AI Learning Platform API"}
