@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -25,6 +25,26 @@ from app.modules.quizzes.service import quiz_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/quizzes", tags=["Quizzes"])
+
+
+@router.get(
+    "",
+    response_model=list[QuizResponse],
+    status_code=status.HTTP_200_OK,
+    summary="Lấy danh sách các bộ quiz của người dùng hiện tại",
+)
+async def list_quizzes(
+    subject_id: uuid.UUID | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[QuizResponse]:
+    """Lấy danh sách các bộ quiz đã tạo của người dùng hiện tại, sắp xếp mới nhất trước."""
+    quizzes = await quiz_service.list_user_quizzes(
+        db=db,
+        user_id=current_user.id,
+        subject_id=subject_id,
+    )
+    return [QuizResponse.model_validate(q) for q in quizzes]
 
 
 @router.post(
@@ -119,3 +139,29 @@ async def get_quiz(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+@router.delete(
+    "/{quiz_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Xóa một bộ quiz của người dùng hiện tại",
+)
+async def delete_quiz(
+    quiz_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Xóa bộ quiz theo ID nếu thuộc quyền sở hữu của người dùng hiện tại."""
+    try:
+        await quiz_service.delete_quiz(
+            db=db,
+            quiz_id=quiz_id,
+            user_id=current_user.id,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+    except QuizNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+

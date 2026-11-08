@@ -347,6 +347,39 @@ class QuizService:
         reloaded = await session.execute(stmt_reload)
         return reloaded.scalar_one()
 
+    async def list_user_quizzes(
+        self,
+        db: AsyncSession,
+        user_id: uuid.UUID,
+        subject_id: uuid.UUID | None = None,
+    ) -> list[Quiz]:
+        """Lists quizzes belonging to the authorized user, newest first."""
+        stmt = (
+            select(Quiz)
+            .options(selectinload(Quiz.questions))
+            .where(Quiz.user_id == user_id)
+        )
+        if subject_id is not None:
+            stmt = stmt.where(Quiz.subject_id == subject_id)
+        stmt = stmt.order_by(Quiz.created_at.desc())
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def delete_quiz(
+        self,
+        db: AsyncSession,
+        quiz_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Deletes a quiz owned by the authorized user."""
+        stmt = select(Quiz).where(Quiz.id == quiz_id, Quiz.user_id == user_id)
+        result = await db.execute(stmt)
+        quiz = result.scalar_one_or_none()
+        if not quiz:
+            raise QuizNotFoundError(quiz_id)
+        await db.delete(quiz)
+        await db.commit()
+
     async def get_quiz(
         self,
         user_id: uuid.UUID,
