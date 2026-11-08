@@ -220,6 +220,8 @@ class QuizService:
                 explanation=q.explanation,
                 target_page=q.target_page,
                 topic_tag=q.topic_tag,
+                source_document_id=document.id,
+                source_document_title=document.title,
             )
             db.add(question_db)
 
@@ -238,11 +240,11 @@ class QuizService:
         user_id: uuid.UUID,
         subject_id: uuid.UUID | None = None,
     ) -> list[Quiz]:
-        """Lists all quizzes belonging to the authorized user, newest first."""
+        """Lists standalone quizzes belonging to the authorized user, newest first."""
         stmt = (
             select(Quiz)
             .options(selectinload(Quiz.questions))
-            .where(Quiz.user_id == user_id)
+            .where(Quiz.user_id == user_id, Quiz.roadmap_id.is_(None))
         )
         if subject_id is not None:
             stmt = stmt.where(Quiz.subject_id == subject_id)

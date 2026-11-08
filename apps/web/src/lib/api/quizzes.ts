@@ -19,12 +19,15 @@ export interface QuizQuestionItem {
   explanation: string | null
   target_page: number | null
   topic_tag: string | null
+  source_document_id?: string | null
+  source_document_title?: string | null
 }
 
 export interface QuizItem {
   id: string
   document_id: string
   subject_id: string | null
+  roadmap_id?: string | null
   title: string
   total_questions: number
   time_limit_minutes: number

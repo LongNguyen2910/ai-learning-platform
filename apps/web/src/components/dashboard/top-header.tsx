@@ -13,12 +13,14 @@ import {
   Target,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
+import { resolveAvatarUrl } from "@/lib/api/profile"
 import type { SidebarSection } from "@/components/dashboard/app-sidebar"
 
 interface AuthUser {
   id: string
   email: string
   full_name?: string | null
+  avatar_url?: string | null
   role?: string
 }
 
@@ -82,8 +84,23 @@ export function TopHeader({
     }
 
     void fetchMe()
+
+    const handleUserUpdated = () => {
+      try {
+        const latest = localStorage.getItem("auth_user")
+        if (latest) {
+          const parsed = JSON.parse(latest) as AuthUser
+          setCurrentUser(parsed)
+        }
+      } catch {
+        // Ignore invalid JSON
+      }
+    }
+
+    window.addEventListener("auth-user-updated", handleUserUpdated)
     return () => {
       cancelled = true
+      window.removeEventListener("auth-user-updated", handleUserUpdated)
     }
   }, [])
 
@@ -127,6 +144,7 @@ export function TopHeader({
     currentUser?.email?.split("@")[0] ||
     "Account"
   const displayEmail = currentUser?.email || "Personal Account"
+  const resolvedAvatar = resolveAvatarUrl(currentUser?.avatar_url)
 
   return (
     <header className="h-16 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm px-6 flex items-center justify-between shrink-0 z-20">
@@ -206,8 +224,16 @@ export function TopHeader({
             aria-label="User profile menu"
             className="flex items-center gap-2.5 rounded-full p-1 pr-3 border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] active:scale-[0.98]"
           >
-            <div className="h-8 w-8 rounded-full bg-[#0A77FF] text-white flex items-center justify-center shadow-xs shrink-0 font-bold text-xs">
-              {displayName.charAt(0).toUpperCase()}
+            <div className="h-8 w-8 rounded-full bg-[#0A77FF] text-white flex items-center justify-center shadow-xs shrink-0 font-bold text-xs overflow-hidden">
+              {resolvedAvatar ? (
+                <img
+                  src={resolvedAvatar}
+                  alt={displayName}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                displayName.charAt(0).toUpperCase()
+              )}
             </div>
             <span className="hidden sm:block text-xs font-semibold text-slate-700 dark:text-slate-200 max-w-[160px] truncate">
               {displayName}

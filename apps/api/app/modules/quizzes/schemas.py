@@ -30,6 +30,14 @@ class GeneratedQuestionItem(BaseModel):
         description="Số trang tài liệu chính xác nơi xuất hiện kiến thức này"
     )
     topic_tag: str = Field(description="Nhãn chủ đề hoặc khái niệm chính")
+    source_document_id: str | None = Field(
+        default=None,
+        description="UUID của tài liệu nguồn chứa kiến thức của câu hỏi này (dùng cho bài kiểm tra đa tài liệu)",
+    )
+    source_document_title: str | None = Field(
+        default=None,
+        description="Tiêu đề tài liệu nguồn chứa kiến thức của câu hỏi này",
+    )
 
 
 class GeneratedQuizPayload(BaseModel):
@@ -57,14 +65,17 @@ class QuizQuestionResponse(BaseModel):
     explanation: str | None = None
     target_page: int | None = None
     topic_tag: str | None = None
+    source_document_id: UUID | None = None
+    source_document_title: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class QuizResponse(BaseModel):
     id: UUID
-    document_id: UUID
+    document_id: UUID | None = None
     subject_id: UUID | None = None
+    roadmap_id: UUID | None = None
     title: str
     total_questions: int
     time_limit_minutes: int

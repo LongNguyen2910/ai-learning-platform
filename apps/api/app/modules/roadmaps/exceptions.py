@@ -106,3 +106,24 @@ class PrerequisiteNotCompletedException(RoadmapDomainException):
         self.node_id = node_id
         self.prerequisite_node_id = prerequisite_node_id
 
+
+class RoadmapExamLockedException(RoadmapDomainException):
+    """Raised when attempting to take or generate a final exam before completing 100% of the roadmap."""
+
+    def __init__(self, roadmap_id: uuid.UUID | str, progress: float) -> None:
+        super().__init__(
+            f"Roadmap '{roadmap_id}' final assessment is locked (current progress: {progress:.1f}%, required: 100%)."
+        )
+        self.roadmap_id = roadmap_id
+        self.progress = progress
+
+
+class RoadmapRemediationNotAllowedException(RoadmapDomainException):
+    """Raised when attempting to regenerate a remedial roadmap when exam_status is not failed."""
+
+    def __init__(self, roadmap_id: uuid.UUID | str, exam_status: str) -> None:
+        super().__init__(
+            f"Roadmap '{roadmap_id}' cannot be remediated because its exam_status is '{exam_status}' (must be 'failed')."
+        )
+        self.roadmap_id = roadmap_id
+        self.exam_status = exam_status

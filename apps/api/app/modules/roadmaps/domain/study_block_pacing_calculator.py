@@ -58,6 +58,8 @@ class StudyBlockPacingCalculator:
         today: date,
         hours_per_day: float,
         session_mode: StudySessionMode = StudySessionMode.AUTO,
+        force_allow_secondary: bool = False,
+        remediation_multiplier: float = 1.0,
     ) -> list[PlannedChapterNode]:
         """Calculates pacing, prunes secondary content if constrained, and slices blocks."""
         if not curriculum.chapters:
@@ -67,12 +69,16 @@ class StudyBlockPacingCalculator:
             target_date, today, hours_per_day
         )
         total_baseline = self._sum_curriculum_baseline(curriculum)
-        allow_secondary = total_baseline <= available_minutes
+        allow_secondary = force_allow_secondary or (total_baseline <= available_minutes)
 
         planned_chapters: list[PlannedChapterNode] = []
         for chapter in curriculum.chapters:
             planned_chapter = self._process_chapter(
-                chapter, allow_secondary, session_mode, hours_per_day
+                chapter,
+                allow_secondary,
+                session_mode,
+                hours_per_day,
+                remediation_multiplier=remediation_multiplier,
             )
             if planned_chapter.topics:
                 planned_chapters.append(planned_chapter)
@@ -88,6 +94,7 @@ class StudyBlockPacingCalculator:
         allow_secondary: bool,
         session_mode: StudySessionMode,
         hours_per_day: float,
+        remediation_multiplier: float = 1.0,
     ) -> PlannedChapterNode:
         """Processes and filters topics inside a chapter."""
         planned_topics: list[PlannedTopicNode] = []
@@ -100,6 +107,7 @@ class StudyBlockPacingCalculator:
                 session_mode=session_mode,
                 hours_per_day=hours_per_day,
                 fallback_doc_id=chapter.document_id,
+                remediation_multiplier=remediation_multiplier,
             )
             planned_topics.append(
                 PlannedTopicNode(
@@ -128,6 +136,7 @@ class StudyBlockPacingCalculator:
         session_mode: StudySessionMode = StudySessionMode.MICRO,
         hours_per_day: float = 2.0,
         fallback_doc_id: str | None = None,
+        remediation_multiplier: float = 1.0,
     ) -> list[AllocatedStudyBlock]:
         """Slices topic pages into 15-30m or 45-90m blocks based on mode and constraints."""
         start = min(topic.target_page_start, topic.target_page_end)
@@ -136,7 +145,9 @@ class StudyBlockPacingCalculator:
         mins_per_page = self.MINUTES_PER_PAGE_BY_COMPLEXITY.get(
             topic.complexity_level, 7
         )
-        total_estimated = page_count * mins_per_page
+        total_estimated = int(
+            round(page_count * mins_per_page * max(1.0, remediation_multiplier))
+        )
 
         target_mins, min_mins, max_mins = resolve_block_duration_bounds(
             session_mode, topic.complexity_level, hours_per_day

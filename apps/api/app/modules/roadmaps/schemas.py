@@ -10,6 +10,7 @@ from pydantic import (
     model_validator,
 )
 
+from app.modules.quizzes.schemas import QuizResponse
 from app.modules.roadmaps.domain.study_session_mode import StudySessionMode
 
 
@@ -162,7 +163,36 @@ class RoadmapResponse(BaseModel):
     available_hours_per_day: float
     progress_percentage: float
     status: str
+    exam_status: str = "locked"
+    latest_exam_score: float | None = None
+    iteration: int = 1
+    parent_roadmap_id: uuid.UUID | None = None
+    weak_topics: list[str] = Field(default_factory=list)
     created_at: datetime
+
+    @field_validator("exam_status", mode="before")
+    @classmethod
+    def _default_exam_status(cls, v: str | None) -> str:
+        return v or "locked"
+
+    @field_validator("iteration", mode="before")
+    @classmethod
+    def _default_iteration(cls, v: int | None) -> int:
+        return v if v is not None else 1
+
+    @field_validator("weak_topics", mode="before")
+    @classmethod
+    def _default_weak_topics(cls, v: list[str] | None) -> list[str]:
+        return list(v) if v else []
+
+    @model_validator(mode="after")
+    def _sync_exam_ready_state(self) -> "RoadmapResponse":
+        if (
+            self.exam_status == "locked"
+            and (self.progress_percentage >= 100.0 or self.status == "completed")
+        ):
+            self.exam_status = "ready"
+        return self
 
     @computed_field
     @property
@@ -200,3 +230,60 @@ class RoadmapNodeCompletionResponse(BaseModel):
     unlocked_node_ids: list[uuid.UUID]
     progress_percentage: float
     roadmap_status: str
+    exam_status: str = "locked"
+
+
+class RoadmapExamSubmitAnswer(BaseModel):
+    """Single question answer submitted during a Roadmap Final Assessment."""
+
+    question_id: uuid.UUID
+    selected_option: str = Field(description="Selected option key: A, B, C, or D")
+
+
+class RoadmapExamSubmitRequest(BaseModel):
+    """Payload for submitting a Roadmap Final Assessment."""
+
+    answers: list[RoadmapExamSubmitAnswer] = Field(default_factory=list)
+
+
+class RoadmapExamQuestionResult(BaseModel):
+    """Per-question grading breakdown for a Roadmap Final Assessment."""
+
+    question_id: uuid.UUID
+    selected_option: str | None = None
+    correct_option: str
+    is_correct: bool
+    explanation: str | None = None
+    topic_tag: str | None = None
+    target_page: int | None = None
+    source_document_id: uuid.UUID | None = None
+    source_document_title: str | None = None
+
+
+class RoadmapExamAttemptResponse(BaseModel):
+    """Comprehensive grading result of a Roadmap Final Assessment."""
+
+    attempt_id: uuid.UUID
+    quiz_id: uuid.UUID
+    roadmap_id: uuid.UUID
+    score: float
+    passed: bool
+    pass_threshold: float = 50.0
+    total_questions: int
+    total_correct: int
+    total_incorrect: int
+    exam_status: str
+    weak_topics: list[str] = Field(default_factory=list)
+    results: list[RoadmapExamQuestionResult] = Field(default_factory=list)
+    completed_at: datetime
+
+
+class RoadmapExamStateResponse(BaseModel):
+    """Current Final Assessment state for a Roadmap (used across F5 reloads)."""
+
+    roadmap_id: uuid.UUID
+    exam_status: str
+    latest_exam_score: float | None = None
+    weak_topics: list[str] = Field(default_factory=list)
+    quiz: QuizResponse | None = None
+    latest_attempt: RoadmapExamAttemptResponse | None = None

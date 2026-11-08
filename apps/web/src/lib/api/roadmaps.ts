@@ -1,4 +1,5 @@
 import { getAuthHeaders } from "@/lib/api/documents"
+import type { QuizItem } from "@/lib/api/quizzes"
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
@@ -42,7 +43,12 @@ export interface RoadmapItem {
   target_date: string | null
   available_hours_per_day: number
   progress_percentage: number
-  status: "generating" | "active" | "completed" | "failed" | string
+  status: "generating" | "active" | "completed" | "failed" | "archived" | string
+  exam_status?: "locked" | "ready" | "passed" | "failed" | string
+  latest_exam_score?: number | null
+  iteration?: number
+  parent_roadmap_id?: string | null
+  weak_topics?: string[]
   created_at: string
 }
 
@@ -75,6 +81,44 @@ export interface RoadmapNodeCompletionResponse {
   unlocked_node_ids: string[]
   progress_percentage: number
   roadmap_status: "active" | "completed" | string
+  exam_status?: "locked" | "ready" | "passed" | "failed" | string
+}
+
+export interface RoadmapExamQuestionResult {
+  question_id: string
+  selected_option: string | null
+  correct_option: string
+  is_correct: boolean
+  explanation: string | null
+  topic_tag: string | null
+  target_page: number | null
+  source_document_id: string | null
+  source_document_title: string | null
+}
+
+export interface RoadmapExamAttemptResponse {
+  attempt_id: string
+  quiz_id: string
+  roadmap_id: string
+  score: number
+  passed: boolean
+  pass_threshold: number
+  total_questions: number
+  total_correct: number
+  total_incorrect: number
+  exam_status: "passed" | "failed" | string
+  weak_topics: string[]
+  results: RoadmapExamQuestionResult[]
+  completed_at: string
+}
+
+export interface RoadmapExamStateResponse {
+  roadmap_id: string
+  exam_status: "locked" | "ready" | "passed" | "failed" | string
+  latest_exam_score: number | null
+  weak_topics: string[]
+  quiz: QuizItem | null
+  latest_attempt: RoadmapExamAttemptResponse | null
 }
 
 export async function fetchSubjects(): Promise<SubjectItem[]> {
@@ -290,4 +334,95 @@ export async function deleteSubject(subjectId: string): Promise<void> {
     const err = await response.json().catch(() => null)
     throw new Error(err?.detail || `Could not delete subject (${response.status})`)
   }
+}
+
+export async function fetchRoadmapExamState(
+  roadmapId: string
+): Promise<RoadmapExamStateResponse> {
+  const response = await fetch(`${API_BASE_URL}/roadmaps/${roadmapId}/exam`, {
+    method: "GET",
+    headers: getAuthHeaders({ Accept: "application/json" }),
+    cache: "no-store",
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Could not load roadmap assessment (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+
+export async function generateRoadmapExam(roadmapId: string): Promise<QuizItem> {
+  const response = await fetch(
+    `${API_BASE_URL}/roadmaps/${roadmapId}/exam/generate`,
+    {
+      method: "POST",
+      headers: getAuthHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Could not generate final assessment (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+
+export async function submitRoadmapExam(
+  roadmapId: string,
+  answers: { question_id: string; selected_option: string }[]
+): Promise<RoadmapExamAttemptResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/roadmaps/${roadmapId}/exam/submit`,
+    {
+      method: "POST",
+      headers: getAuthHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+      body: JSON.stringify({ answers }),
+    }
+  )
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Could not submit final assessment (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+
+export async function remediateRoadmap(
+  roadmapId: string
+): Promise<RoadmapTaskStatusResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/roadmaps/${roadmapId}/remediate`,
+    {
+      method: "POST",
+      headers: getAuthHeaders({
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Could not regenerate adaptive roadmap (${response.status})`
+    )
+  }
+
+  return response.json()
 }

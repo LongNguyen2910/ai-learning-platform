@@ -1,8 +1,12 @@
+from pathlib import Path
+import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.modules.auth.dependencies import get_current_active_user
 from app.modules.auth.exceptions import (
@@ -24,6 +28,8 @@ from app.modules.auth.schemas import (
 from app.modules.auth.service import auth_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
+
+_SAFE_AVATAR_FILENAME_RE = re.compile(r"^[a-f0-9_]+\.(?:jpg|png|webp|gif)$")
 
 
 @router.post(
@@ -95,6 +101,54 @@ async def update_me(
 ) -> UserResponse:
     updated = await auth_service.update_profile(db, current_user, req)
     return UserResponse.model_validate(updated)
+
+
+@router.post(
+    "/me/avatar",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload and update current user's profile avatar image",
+)
+async def upload_me_avatar(
+    file: Annotated[UploadFile, File(...)],
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    try:
+        file_bytes = await file.read()
+        updated = await auth_service.upload_avatar(
+            db=db,
+            user=current_user,
+            filename=file.filename,
+            content_type=file.content_type,
+            file_bytes=file_bytes,
+        )
+        return UserResponse.model_validate(updated)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.get(
+    "/avatars/{filename}",
+    status_code=status.HTTP_200_OK,
+    summary="Serve user avatar image",
+)
+async def get_avatar_image(filename: str) -> FileResponse:
+    if not _SAFE_AVATAR_FILENAME_RE.match(filename):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Avatar not found.",
+        )
+    avatar_path = Path(settings.UPLOAD_DIR) / "avatars" / filename
+    if not avatar_path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Avatar not found.",
+        )
+    return FileResponse(avatar_path)
 
 
 @router.post(

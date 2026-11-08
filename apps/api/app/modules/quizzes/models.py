@@ -38,15 +38,21 @@ class Quiz(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    document_id: Mapped[uuid.UUID] = mapped_column(
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("subjects.id", ondelete="SET NULL"),
         nullable=True,
+    )
+    roadmap_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roadmaps.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     is_interleaved: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -60,7 +66,9 @@ class Quiz(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="quizzes")
-    document: Mapped["Document"] = relationship("Document", back_populates="quizzes")
+    document: Mapped[Optional["Document"]] = relationship(
+        "Document", back_populates="quizzes"
+    )
     subject: Mapped[Optional["Subject"]] = relationship(
         "Subject", back_populates="quizzes"
     )
@@ -96,6 +104,12 @@ class QuizQuestion(Base):
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     topic_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_document_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    source_document_title: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )
 
     __table_args__ = (Index("idx_quiz_questions_quiz_id", "quiz_id"),)
 

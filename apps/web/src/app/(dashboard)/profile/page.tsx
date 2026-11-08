@@ -5,7 +5,6 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import {
   ArrowLeft,
-  User,
   Sparkles,
   Calendar,
   Clock,
@@ -20,11 +19,14 @@ import {
   AlertCircle,
   Loader2,
   ShieldCheck,
+  Pencil,
 } from "lucide-react"
 import {
   fetchUserProfile,
   updateUserProfile,
+  uploadUserAvatar,
   changeUserPassword,
+  resolveAvatarUrl,
   type UserProfileResponse,
 } from "@/lib/api/profile"
 import { fetchDocuments, type DocumentItem } from "@/lib/api/documents"
@@ -37,6 +39,11 @@ export default function ProfilePage() {
   const [profile, setProfile] = React.useState<UserProfileResponse | null>(null)
   const [isLoadingProfile, setIsLoadingProfile] = React.useState(true)
   const [loadError, setLoadError] = React.useState<string | null>(null)
+
+  // Avatar upload state
+  const avatarInputRef = React.useRef<HTMLInputElement>(null)
+  const [isUploadingAvatar, setIsUploadingAvatar] = React.useState(false)
+  const [avatarErrorMsg, setAvatarErrorMsg] = React.useState<string | null>(null)
 
   // Learning stats
   const [documents, setDocuments] = React.useState<DocumentItem[]>([])
@@ -105,6 +112,39 @@ export default function ProfilePage() {
     }
   }, [])
 
+  // Handle Avatar Upload
+  const handleAvatarFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+
+    setAvatarErrorMsg(null)
+    if (!file.type.startsWith("image/")) {
+      setAvatarErrorMsg("Please select a valid image file (PNG, JPG, WEBP, GIF).")
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setAvatarErrorMsg("Image size must not exceed 5 MB.")
+      return
+    }
+
+    setIsUploadingAvatar(true)
+    try {
+      const updated = await uploadUserAvatar(file)
+      setProfile(updated)
+      localStorage.setItem("auth_user", JSON.stringify(updated))
+      window.dispatchEvent(new Event("auth-user-updated"))
+    } catch (err) {
+      setAvatarErrorMsg(
+        err instanceof Error ? err.message : "Failed to upload avatar."
+      )
+    } finally {
+      setIsUploadingAvatar(false)
+    }
+  }
+
   // Handle Update Profile Name
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -119,6 +159,7 @@ export default function ProfilePage() {
       setProfile(updated)
       setFullName(updated.full_name || "")
       localStorage.setItem("auth_user", JSON.stringify(updated))
+      window.dispatchEvent(new Event("auth-user-updated"))
       setProfileSuccessMsg("Profile updated successfully.")
       setTimeout(() => setProfileSuccessMsg(null), 3000)
     } catch (err) {
@@ -185,6 +226,7 @@ export default function ProfilePage() {
   }, [roadmaps])
 
   const displayName = profile?.full_name?.trim() || profile?.email?.split("@")[0] || "User"
+  const resolvedAvatarUrl = resolveAvatarUrl(profile?.avatar_url)
   const memberSince = profile?.created_at
     ? new Date(profile.created_at).toLocaleDateString("en-US", {
         month: "short",
@@ -250,9 +292,46 @@ export default function ProfilePage() {
             {/* 1. Identity Card */}
             <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 shadow-2xs space-y-5">
               <div className="flex items-center gap-4">
-                <div className="h-16 w-16 rounded-2xl bg-[#0A77FF] text-white flex items-center justify-center font-bold text-2xl shadow-xs shrink-0 select-none">
-                  {displayName.charAt(0).toUpperCase()}
-                </div>
+                <input
+                  ref={avatarInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={handleAvatarFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => avatarInputRef.current?.click()}
+                  disabled={isUploadingAvatar}
+                  title="Upload new profile picture"
+                  aria-label="Upload new profile picture"
+                  className="group relative h-16 w-16 rounded-2xl bg-[#0A77FF] text-white flex items-center justify-center font-bold text-2xl shadow-xs shrink-0 select-none overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] focus-visible:ring-offset-2"
+                >
+                  {resolvedAvatarUrl ? (
+                    <img
+                      src={resolvedAvatarUrl}
+                      alt={displayName}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <span>{displayName.charAt(0).toUpperCase()}</span>
+                  )}
+
+                  {/* Pencil Hover Overlay */}
+                  <div
+                    className={`absolute inset-0 bg-slate-900/55 backdrop-blur-[1px] flex items-center justify-center transition-opacity duration-150 ${
+                      isUploadingAvatar
+                        ? "opacity-100"
+                        : "opacity-0 group-hover:opacity-100"
+                    }`}
+                  >
+                    {isUploadingAvatar ? (
+                      <Loader2 className="h-5 w-5 text-white animate-spin" />
+                    ) : (
+                      <Pencil className="h-5 w-5 text-white stroke-[2]" />
+                    )}
+                  </div>
+                </button>
 
                 <div className="min-w-0 flex-1">
                   <h2 className="text-base font-bold text-slate-900 dark:text-white truncate">
@@ -272,6 +351,13 @@ export default function ProfilePage() {
                   </div>
                 </div>
               </div>
+
+              {avatarErrorMsg && (
+                <div className="rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{avatarErrorMsg}</span>
+                </div>
+              )}
 
               <div className="pt-4 border-t border-slate-100 dark:border-slate-800/80 text-xs text-slate-500 dark:text-slate-400 flex items-center gap-2">
                 <Calendar className="h-4 w-4 text-slate-400 shrink-0" />

@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.modules.documents.models import Document, Subject
+from app.modules.quizzes.models import Quiz, QuizAttempt
 from app.modules.roadmaps.models import Roadmap, RoadmapNode
 from app.modules.roadmaps.roadmap_tree_builder import UnpersistedNode
 
@@ -23,8 +24,11 @@ class RoadmapRepository:
         title: str,
         target_date: date | None,
         available_hours_per_day: float,
+        iteration: int = 1,
+        parent_roadmap_id: uuid.UUID | None = None,
+        weak_topics: list[str] | None = None,
     ) -> Roadmap:
-        """Creates a new roadmap record in active status."""
+        """Creates a new roadmap record in generating status."""
         roadmap = Roadmap(
             id=uuid.uuid4(),
             user_id=user_id,
@@ -34,6 +38,10 @@ class RoadmapRepository:
             available_hours_per_day=available_hours_per_day,
             status="generating",
             progress_percentage=0.0,
+            exam_status="locked",
+            iteration=iteration,
+            parent_roadmap_id=parent_roadmap_id,
+            weak_topics=list(weak_topics) if weak_topics else [],
         )
         self.session.add(roadmap)
         await self.session.flush()
@@ -47,6 +55,22 @@ class RoadmapRepository:
             select(Roadmap)
             .where(Roadmap.id == roadmap_id)
             .options(selectinload(Roadmap.nodes))
+        )
+        result = await self.session.execute(query)
+        return result.scalars().first()
+
+    async def get_latest_exam_quiz(
+        self, roadmap_id: uuid.UUID
+    ) -> Quiz | None:
+        """Fetches the latest Final Assessment Quiz and its attempts for a roadmap."""
+        query = (
+            select(Quiz)
+            .where(Quiz.roadmap_id == roadmap_id)
+            .options(
+                selectinload(Quiz.questions),
+                selectinload(Quiz.attempts).selectinload(QuizAttempt.answers),
+            )
+            .order_by(Quiz.created_at.desc())
         )
         result = await self.session.execute(query)
         return result.scalars().first()
@@ -152,7 +176,7 @@ class RoadmapRepository:
     async def update_status(
         self, roadmap_id: uuid.UUID, status: str
     ) -> None:
-        """Updates roadmap lifecycle status (generating, active, completed)."""
+        """Updates roadmap lifecycle status (generating, active, completed, archived)."""
         roadmap = await self.get_roadmap_by_id(roadmap_id)
         if roadmap is None:
             return
@@ -186,4 +210,9 @@ class RoadmapRepository:
             return
         roadmap.progress_percentage = progress
         roadmap.status = status
+        if progress >= 100.0 and getattr(roadmap, "exam_status", "locked") in (
+            None,
+            "locked",
+        ):
+            roadmap.exam_status = "ready"
         await self.session.flush()

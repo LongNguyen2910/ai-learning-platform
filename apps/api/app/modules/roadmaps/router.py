@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import AsyncSessionLocal, get_db
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
+from app.modules.quizzes.exceptions import GeminiGenerationError, QuizNotFoundError
+from app.modules.quizzes.schemas import QuizResponse
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
     InvalidStudyGoalException,
@@ -16,12 +18,17 @@ from app.modules.roadmaps.exceptions import (
     NodeNotLeafException,
     PrerequisiteNotCompletedException,
     RoadmapAccessForbiddenException,
+    RoadmapExamLockedException,
     RoadmapNotActiveException,
     RoadmapNotFoundException,
+    RoadmapRemediationNotAllowedException,
     SubjectNotFoundException,
 )
 from app.modules.roadmaps.repository import RoadmapRepository
 from app.modules.roadmaps.schemas import (
+    RoadmapExamAttemptResponse,
+    RoadmapExamStateResponse,
+    RoadmapExamSubmitRequest,
     RoadmapGenerateRequest,
     RoadmapNodeCompletionResponse,
     RoadmapResponse,
@@ -37,14 +44,31 @@ _global_task_registry: dict[str, RoadmapTaskStatusResponse] = {}
 
 
 async def _execute_roadmap_pipeline(
-    task_id: str, roadmap_id: uuid.UUID, req: RoadmapGenerateRequest
+    task_id: str,
+    roadmap_id: uuid.UUID,
+    req: RoadmapGenerateRequest,
+    weak_topics: list[str] | None = None,
+    incorrect_questions_summary: list[str] | None = None,
+    iteration: int = 1,
+    is_remediation: bool = False,
 ) -> None:
     """Isolated background runner with dedicated async session."""
     async with AsyncSessionLocal() as session:
         repo = RoadmapRepository(session)
         service = RoadmapService(repo)
         service._task_cache = _global_task_registry
-        await service.run_generation_pipeline(task_id, roadmap_id, req)
+        if is_remediation:
+            await service.run_generation_pipeline(
+                task_id,
+                roadmap_id,
+                req,
+                weak_topics=weak_topics,
+                incorrect_questions_summary=incorrect_questions_summary,
+                iteration=iteration,
+                is_remediation=True,
+            )
+        else:
+            await service.run_generation_pipeline(task_id, roadmap_id, req)
 
 
 @router.post(
@@ -138,6 +162,193 @@ async def get_roadmap_tree_structure(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=exc.message
         ) from exc
+
+
+@router.get("/{roadmap_id}/exam", response_model=RoadmapExamStateResponse)
+async def get_roadmap_exam_state(
+    roadmap_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RoadmapExamStateResponse:
+    """Returns the Final Assessment state, active exam quiz, and latest attempt for a roadmap."""
+    repo = RoadmapRepository(db)
+    service = RoadmapService(repo)
+    try:
+        return await service.get_roadmap_exam_state(
+            roadmap_id=roadmap_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+    except RoadmapNotFoundException as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=err.message
+        ) from err
+    except RoadmapAccessForbiddenException as err:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=err.message
+        ) from err
+
+
+@router.post(
+    "/{roadmap_id}/exam/generate",
+    response_model=QuizResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_roadmap_final_exam(
+    roadmap_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> QuizResponse:
+    """Generates a multi-document Final Assessment across the subject once roadmap reaches 100%."""
+    repo = RoadmapRepository(db)
+    service = RoadmapService(repo)
+    try:
+        quiz_resp = await service.generate_roadmap_exam(
+            roadmap_id=roadmap_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        await db.commit()
+        return quiz_resp
+    except (RoadmapNotFoundException, DocumentNotParsedException) as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=err.message
+        ) from err
+    except RoadmapAccessForbiddenException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=err.message
+        ) from err
+    except RoadmapExamLockedException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=err.message
+        ) from err
+    except GeminiGenerationError as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err)
+        ) from err
+    except Exception as err:
+        await db.rollback()
+        logger.exception("Unexpected error generating roadmap exam for %s", roadmap_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate final assessment: {err}",
+        ) from err
+
+
+@router.post(
+    "/{roadmap_id}/exam/submit",
+    response_model=RoadmapExamAttemptResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def submit_roadmap_final_exam(
+    roadmap_id: uuid.UUID,
+    req: RoadmapExamSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RoadmapExamAttemptResponse:
+    """Submits and grades a Roadmap Final Assessment (Pass >= 50%, Fail < 50%)."""
+    repo = RoadmapRepository(db)
+    service = RoadmapService(repo)
+    try:
+        attempt_resp = await service.submit_roadmap_exam(
+            roadmap_id=roadmap_id,
+            user_id=current_user.id,
+            req=req,
+            user_role=current_user.role,
+        )
+        await db.commit()
+        return attempt_resp
+    except (RoadmapNotFoundException, QuizNotFoundError) as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(err)
+        ) from err
+    except RoadmapAccessForbiddenException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=err.message
+        ) from err
+    except RoadmapExamLockedException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=err.message
+        ) from err
+    except Exception as err:
+        await db.rollback()
+        logger.exception("Unexpected error submitting roadmap exam for %s", roadmap_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to submit final assessment: {err}",
+        ) from err
+
+
+@router.post(
+    "/{roadmap_id}/remediate",
+    response_model=RoadmapTaskStatusResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def remediate_failed_roadmap(
+    roadmap_id: uuid.UUID,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RoadmapTaskStatusResponse:
+    """Archives a failed roadmap and generates a longer, deeper Adaptive Remediation Roadmap."""
+    repo = RoadmapRepository(db)
+    service = RoadmapService(repo)
+    service._task_cache = _global_task_registry
+
+    try:
+        (
+            task_response,
+            req,
+            weak_topics,
+            incorrect_questions_summary,
+            new_iteration,
+        ) = await service.initiate_remediation(
+            roadmap_id=roadmap_id,
+            user_id=current_user.id,
+            user_role=current_user.role,
+        )
+        await db.commit()
+    except (RoadmapNotFoundException, DocumentNotParsedException) as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=err.message
+        ) from err
+    except RoadmapAccessForbiddenException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=err.message
+        ) from err
+    except RoadmapRemediationNotAllowedException as err:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=err.message
+        ) from err
+    except Exception as err:
+        await db.rollback()
+        logger.exception("Unexpected error initiating remediation for %s", roadmap_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate adaptive remediation: {err}",
+        ) from err
+
+    background_tasks.add_task(
+        _execute_roadmap_pipeline,
+        task_response.task_id,
+        task_response.roadmap_id,
+        req,
+        weak_topics,
+        incorrect_questions_summary,
+        new_iteration,
+        True,
+    )
+    return task_response
 
 
 @router.get("", response_model=list[RoadmapResponse])
@@ -248,10 +459,10 @@ async def complete_roadmap_node(
             status_code=status.HTTP_403_FORBIDDEN, detail=err.message
         ) from err
     except (
-        NodeLockedException,
-        NodeNotLeafException,
-        PrerequisiteNotCompletedException,
         RoadmapNotActiveException,
+        NodeNotLeafException,
+        NodeLockedException,
+        PrerequisiteNotCompletedException,
     ) as err:
         await db.rollback()
         raise HTTPException(

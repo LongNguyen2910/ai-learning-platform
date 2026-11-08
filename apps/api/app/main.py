@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.core.models_registry
 from app.core.config import settings
+from app.core.database import ensure_roadmap_exam_schema
 from app.modules.auth import auth_router
 from app.modules.chat import chat_router
 from app.modules.documents import documents_router, ingestion_service, subjects_router
@@ -18,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Ensure Roadmap Exam & Remediation schema columns exist
+    try:
+        await ensure_roadmap_exam_schema()
+    except Exception:
+        logger.exception("Failed to ensure roadmap exam schema on startup")
+
     # Startup: recover any interrupted document ingestion tasks
     try:
         recovered = await ingestion_service.recover_interrupted_documents()

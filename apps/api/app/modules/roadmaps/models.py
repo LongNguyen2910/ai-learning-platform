@@ -15,7 +15,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -57,6 +57,26 @@ class Roadmap(Base):
     )
     status: Mapped[str] = mapped_column(
         String(20), default="active", nullable=False
+    )
+    exam_status: Mapped[str] = mapped_column(
+        String(20), default="locked", server_default=text("'locked'"), nullable=False
+    )
+    latest_exam_score: Mapped[float | None] = mapped_column(
+        Float, nullable=True
+    )
+    iteration: Mapped[int] = mapped_column(
+        Integer, default=1, server_default=text("1"), nullable=False
+    )
+    parent_roadmap_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("roadmaps.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    weak_topics: Mapped[list[str]] = mapped_column(
+        JSONB,
+        default=list,
+        server_default=text("'[]'::jsonb"),
+        nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
