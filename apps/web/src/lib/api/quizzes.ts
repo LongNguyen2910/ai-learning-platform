@@ -110,3 +110,41 @@ export async function deleteQuiz(quizId: string): Promise<void> {
     throw new Error(err?.detail || `Failed to delete quiz (${response.status})`)
   }
 }
+
+export interface QuizAttemptAnswerInput {
+  question_id: string
+  selected_option: string
+}
+
+export interface QuizAttemptRecordResponse {
+  attempt_id: string
+  quiz_id: string
+  score: number
+  total_correct: number
+  total_incorrect: number
+  completed_at: string
+}
+
+export async function recordQuizAttempt(
+  quizId: string,
+  answers: QuizAttemptAnswerInput[]
+): Promise<QuizAttemptRecordResponse> {
+  const response = await fetch(`${API_BASE_URL}/quizzes/${quizId}/attempts`, {
+    method: "POST",
+    headers: getAuthHeaders({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    }),
+    body: JSON.stringify({ answers }),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Failed to record quiz attempt (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+

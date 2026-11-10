@@ -22,6 +22,7 @@ import {
   Award,
   RefreshCw,
   AlertCircle,
+  Layers,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { DocumentItem } from "@/lib/api/documents"
@@ -30,8 +31,14 @@ import {
   fetchQuizzes,
   generateQuiz,
   deleteQuiz,
+  recordQuizAttempt,
   type QuizItem,
 } from "@/lib/api/quizzes"
+import {
+  extractFlashcardsFromQuizAttempt,
+  type ExtractedFlashcardCandidate,
+} from "@/lib/api/flashcards"
+import { FlashcardPreviewModal } from "@/components/dashboard/flashcard-preview-modal"
 import { ChatMarkdownRenderer } from "@/components/dashboard/chat-markdown-renderer"
 
 export type QuizMode = "practice" | "exam"
@@ -149,6 +156,19 @@ export function QuizWorkspace({
   const [isSubmitted, setIsSubmitted] = React.useState<boolean>(false)
   const [remainingSeconds, setRemainingSeconds] = React.useState<number>(15 * 60)
   const [elapsedSeconds, setElapsedSeconds] = React.useState<number>(0)
+
+  // Flashcard extraction from quiz mistakes state
+  const [recordedAttemptId, setRecordedAttemptId] = React.useState<
+    string | null
+  >(null)
+  const [isExtractingFlashcards, setIsExtractingFlashcards] =
+    React.useState(false)
+  const [extractError, setExtractError] = React.useState<string | null>(null)
+  const [extractedCandidates, setExtractedCandidates] = React.useState<
+    ExtractedFlashcardCandidate[]
+  >([])
+  const [isFlashcardPreviewOpen, setIsFlashcardPreviewOpen] =
+    React.useState(false)
 
   // Tracks whether the current active session has already incremented attemptsCount
   const hasCountedSessionRef = React.useRef<boolean>(false)
@@ -307,9 +327,51 @@ export function QuizWorkspace({
       setIsSubmitted(false)
       setRemainingSeconds((quiz.time_limit_minutes || 15) * 60)
       setElapsedSeconds(0)
+      setRecordedAttemptId(null)
+      setExtractError(null)
+      setExtractedCandidates([])
+      setIsFlashcardPreviewOpen(false)
     },
     []
   )
+
+  const handleExtractMistakesToFlashcards = React.useCallback(async () => {
+    if (!activeQuiz || isExtractingFlashcards) return
+    setIsExtractingFlashcards(true)
+    setExtractError(null)
+
+    try {
+      let attemptId = recordedAttemptId
+      if (!attemptId) {
+        const answersPayload = Object.entries(selectedAnswers).map(
+          ([question_id, selected_option]) => ({
+            question_id,
+            selected_option,
+          })
+        )
+        const recorded = await recordQuizAttempt(activeQuiz.id, answersPayload)
+        attemptId = recorded.attempt_id
+        setRecordedAttemptId(attemptId)
+      }
+
+      const extracted = await extractFlashcardsFromQuizAttempt(attemptId)
+      setExtractedCandidates(extracted.cards || [])
+      setIsFlashcardPreviewOpen(true)
+    } catch (err) {
+      setExtractError(
+        err instanceof Error
+          ? err.message
+          : "Could not extract flashcards from quiz mistakes."
+      )
+    } finally {
+      setIsExtractingFlashcards(false)
+    }
+  }, [
+    activeQuiz,
+    isExtractingFlashcards,
+    recordedAttemptId,
+    selectedAnswers,
+  ])
 
   const handleReturnToLibrary = React.useCallback(() => {
     setActiveQuiz(null)
@@ -645,6 +707,32 @@ export function QuizWorkspace({
                         </span>
                       </div>
                     )}
+                    {stats.correct < stats.totalQ && (
+                      <button
+                        type="button"
+                        disabled={isExtractingFlashcards}
+                        onClick={() => void handleExtractMistakesToFlashcards()}
+                        className="h-9 px-3.5 rounded-xl border border-[#0A77FF]/35 bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isExtractingFlashcards ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Extracting Flashcards...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Layers className="h-3.5 w-3.5 stroke-[2]" />
+                            <span>
+                              Extract Flashcards ({stats.totalQ - stats.correct}{" "}
+                              {stats.totalQ - stats.correct === 1
+                                ? "Mistake"
+                                : "Mistakes"}
+                              )
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => handleStartQuiz(activeQuiz, quizMode)}
@@ -663,6 +751,13 @@ export function QuizWorkspace({
                     </button>
                   </div>
                 </div>
+
+                {extractError && (
+                  <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 px-4 py-2.5 text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="h-4 w-4 shrink-0" />
+                    <span>{extractError}</span>
+                  </div>
+                )}
 
                 {/* 3-Level Bloom Taxonomy Breakdown */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -958,6 +1053,18 @@ export function QuizWorkspace({
             )}
           </div>
         </div>
+
+        <FlashcardPreviewModal
+          open={isFlashcardPreviewOpen}
+          onClose={() => setIsFlashcardPreviewOpen(false)}
+          candidates={extractedCandidates}
+          sourceLabel={`Quiz Mistakes · ${activeQuiz.title}`}
+          defaultDocumentId={activeQuiz.document_id}
+          defaultSubjectId={resolveQuizSubjectId(activeQuiz)}
+          defaultDeckTitle={`Mistakes: ${activeQuiz.title}`}
+          documents={documents}
+          subjects={subjects}
+        />
       </div>
     )
   }

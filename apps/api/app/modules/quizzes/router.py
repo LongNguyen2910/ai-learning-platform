@@ -15,6 +15,8 @@ from app.modules.quizzes.exceptions import (
     QuizNotFoundError,
 )
 from app.modules.quizzes.schemas import (
+    QuizAttemptCreateRequest,
+    QuizAttemptCreateResponse,
     QuizGenerateRequest,
     QuizResponse,
 )
@@ -106,6 +108,32 @@ async def get_quiz(
             user_id=current_user.id,
         )
         return QuizResponse.model_validate(quiz)
+    except QuizNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/{quiz_id}/attempts",
+    response_model=QuizAttemptCreateResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Ghi nhận lượt làm bài quiz để phục vụ trích xuất Flashcard",
+)
+async def create_quiz_attempt(
+    quiz_id: uuid.UUID,
+    request: QuizAttemptCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizAttemptCreateResponse:
+    try:
+        return await quiz_service.record_quiz_attempt(
+            db=db,
+            quiz_id=quiz_id,
+            user_id=current_user.id,
+            request=request,
+        )
     except QuizNotFoundError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

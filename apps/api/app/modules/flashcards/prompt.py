@@ -50,3 +50,29 @@ def build_quiz_extraction_prompt(wrong_items: list[dict[str, Any]]) -> str:
         "Hãy phân tích nguyên nhân nhầm lẫn và sinh ra danh sách các thẻ Flashcard tương ứng để học viên ôn tập."
     )
     return "\n".join(lines)
+
+
+FLASHCARD_DECK_GENERATION_SYSTEM_PROMPT = """Bạn là chuyên gia sư phạm và thiết kế học liệu ghi nhớ chủ động (Active Recall & Spaced Repetition).
+
+Nhiệm vụ của bạn là đọc nội dung các trang tài liệu học thuật được cung cấp và trích xuất thành danh sách các thẻ Flashcard (Mặt trước - Mặt sau) có giá trị ôn tập cao nhất.
+
+## NGUYÊN TẮC THIẾT KẾ THẺ:
+1. **Mặt trước (front_text)**: Câu hỏi ngắn gọn kích hoạt trí nhớ chủ động, thuật ngữ chuyên ngành cần định nghĩa, hoặc tên công thức/định lý.
+2. **Mặt sau (back_text)**: Câu trả lời chuẩn xác, súc tích, nêu bật bản chất hoặc công thức toán học chuẩn LaTeX (ví dụ: $\\nabla I = (I_x, I_y)$).
+3. **Số trang tham chiếu (target_page)**: Ghi đúng số trang tài liệu (nằm giữa `=== BẮT ĐẦU TRANG X ===` và `=== KẾT THÚC TRANG X ===`) nơi chứa kiến thức đó.
+4. **Phân loại (category)**: Chọn một trong `"term"`, `"concept"`, hoặc `"formula"`.
+"""
+
+
+def build_document_flashcard_prompt(
+    document_title: str,
+    context_text: str,
+    num_cards: int,
+) -> str:
+    return (
+        f"Tài liệu nguồn: **{document_title}**\n"
+        f"Số lượng thẻ cần sinh: **{num_cards}** thẻ Flashcard trọng tâm nhất.\n\n"
+        f"Nội dung tài liệu theo từng trang:\n\n{context_text}\n\n"
+        f"Hãy trích xuất đúng {num_cards} thẻ Flashcard chất lượng cao theo cấu trúc JSON được yêu cầu."
+    )
+

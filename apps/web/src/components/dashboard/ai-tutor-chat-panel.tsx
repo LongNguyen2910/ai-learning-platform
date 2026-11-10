@@ -22,6 +22,7 @@ import {
   Filter,
   History,
   Trash2,
+  Layers,
 } from "lucide-react"
 import type { DocumentItem } from "@/lib/api/documents"
 import {
@@ -34,8 +35,10 @@ import {
   type ChatSession,
   type ChatMessage,
   type ChatCitation,
+  type ChatFlashcardSuggestion,
   type RetrievedChunkDTO,
 } from "@/lib/api/chat"
+import { FlashcardPreviewModal } from "@/components/dashboard/flashcard-preview-modal"
 import { ChatMarkdownRenderer } from "@/components/dashboard/chat-markdown-renderer"
 
 interface AiTutorChatPanelProps {
@@ -156,6 +159,11 @@ export function AiTutorChatPanel({
   const [expandedSourceMsgIds, setExpandedSourceMsgIds] = React.useState<
     Record<string, boolean>
   >({})
+
+  // Inline Flashcard Suggestion Modal state
+  const [previewSuggestion, setPreviewSuggestion] =
+    React.useState<ChatFlashcardSuggestion | null>(null)
+  const [isFlashcardModalOpen, setIsFlashcardModalOpen] = React.useState(false)
 
   // Direct RAG Citation Search state
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -489,6 +497,18 @@ export function AiTutorChatPanel({
                 )
               )
             },
+            onFlashcardSuggestion: (suggestion) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === tempAssistantMsgId
+                    ? {
+                        ...m,
+                        flashcardSuggestion: suggestion,
+                      }
+                    : m
+                )
+              )
+            },
             onDone: (doneData) => {
               setCurrentTier(doneData.socratic_tier)
               if (doneData.solved) {
@@ -506,6 +526,10 @@ export function AiTutorChatPanel({
                           doneData.citations && doneData.citations.length > 0
                             ? doneData.citations
                             : m.citations,
+                        flashcardSuggestion:
+                          doneData.flashcard_suggestion ||
+                          m.flashcardSuggestion ||
+                          null,
                         isStreaming: false,
                       }
                     : m
@@ -989,6 +1013,10 @@ export function AiTutorChatPanel({
                   msg.mode === "refusal" ||
                   msg.content.includes("Chế độ Socratic Gia sư")
                 const isExpanded = Boolean(expandedSourceMsgIds[msg.id])
+                const suggestion =
+                  msg.flashcardSuggestion ||
+                  msg.mode_metadata?.flashcard_suggestion ||
+                  null
 
                 return (
                   <div key={msg.id} className="flex justify-start">
@@ -1067,6 +1095,58 @@ export function AiTutorChatPanel({
                                 Bật Chế độ Socratic & Nhận gợi ý Tầng 1 ngay
                               </span>
                             </button>
+                          </div>
+                        )}
+
+                      {/* Inline Flashcard Suggestion Card */}
+                      {suggestion &&
+                        suggestion.front_text &&
+                        suggestion.back_text && (
+                          <div className="rounded-xl border border-[#0A77FF]/30 bg-[#0A77FF]/[0.05] dark:bg-[#0A77FF]/12 p-3 space-y-2 animate-in fade-in-0 duration-150">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <div className="h-5 w-5 rounded-md bg-[#0A77FF] text-white flex items-center justify-center shrink-0">
+                                  <Layers className="h-3 w-3 stroke-[2]" />
+                                </div>
+                                <span className="text-[11px] font-bold text-[#0A77FF] dark:text-sky-300">
+                                  Suggested Flashcard
+                                </span>
+                                {suggestion.category && (
+                                  <span className="rounded bg-white/80 dark:bg-slate-900 px-1.5 py-0.5 text-[10px] font-mono uppercase text-slate-600 dark:text-slate-300 border border-slate-200/70 dark:border-slate-800">
+                                    {suggestion.category}
+                                  </span>
+                                )}
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const enrichedSuggestion: ChatFlashcardSuggestion =
+                                    {
+                                      ...suggestion,
+                                      target_page:
+                                        suggestion.target_page ??
+                                        uniquePageCitations[0]?.page_number ??
+                                        currentPage,
+                                    }
+                                  setPreviewSuggestion(enrichedSuggestion)
+                                  setIsFlashcardModalOpen(true)
+                                }}
+                                className="h-7 px-2.5 rounded-lg bg-[#0A77FF] hover:bg-[#0866DF] text-white text-[11px] font-semibold inline-flex items-center gap-1 shadow-2xs transition-colors cursor-pointer active:scale-[0.98]"
+                              >
+                                <Plus className="h-3 w-3 stroke-[2.2]" />
+                                <span>Review &amp; Save to Deck</span>
+                              </button>
+                            </div>
+
+                            <div className="rounded-lg bg-white/90 dark:bg-slate-950/80 border border-slate-200/70 dark:border-slate-800 p-2.5 space-y-1">
+                              <p className="text-[11px] font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">
+                                Q: {suggestion.front_text}
+                              </p>
+                              <p className="text-[11px] text-slate-600 dark:text-slate-300 line-clamp-2">
+                                A: {suggestion.back_text}
+                              </p>
+                            </div>
                           </div>
                         )}
 
@@ -1409,6 +1489,16 @@ export function AiTutorChatPanel({
           </div>
         </div>
       )}
+
+      <FlashcardPreviewModal
+        open={isFlashcardModalOpen}
+        onClose={() => setIsFlashcardModalOpen(false)}
+        candidates={previewSuggestion ? [previewSuggestion] : []}
+        sourceLabel={`AI Tutor · ${document.title}`}
+        defaultDocumentId={document.document_id}
+        defaultSubjectId={document.subject_id}
+        defaultDeckTitle={`Tutor Notes: ${document.title}`}
+      />
     </section>
   )
 }

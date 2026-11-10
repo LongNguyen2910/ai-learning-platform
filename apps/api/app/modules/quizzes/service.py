@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 import logging
 import uuid
 
@@ -17,12 +18,17 @@ from app.modules.quizzes.exceptions import (
     InvalidPageRangeError,
     QuizNotFoundError,
 )
-from app.modules.quizzes.models import Quiz, QuizQuestion
+from app.modules.quizzes.models import Quiz, QuizAttempt, QuizAttemptAnswer, QuizQuestion
 from app.modules.quizzes.prompt import (
     QUIZ_GENERATOR_SYSTEM_PROMPT,
     build_quiz_generation_prompt,
 )
-from app.modules.quizzes.schemas import GeneratedQuizPayload, QuizGenerateRequest
+from app.modules.quizzes.schemas import (
+    GeneratedQuizPayload,
+    QuizAttemptCreateRequest,
+    QuizAttemptCreateResponse,
+    QuizGenerateRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -284,6 +290,66 @@ class QuizService:
             raise QuizNotFoundError(quiz_id)
         await db.delete(quiz)
         await db.commit()
+
+    async def record_quiz_attempt(
+        self,
+        db: AsyncSession,
+        quiz_id: uuid.UUID,
+        user_id: uuid.UUID,
+        request: QuizAttemptCreateRequest,
+    ) -> QuizAttemptCreateResponse:
+        """Persists a completed QuizAttempt and its QuizAttemptAnswers for flashcard extraction."""
+        quiz = await self.get_quiz_by_id(db=db, quiz_id=quiz_id, user_id=user_id)
+        answers_map = {
+            a.question_id: a.selected_option.strip().upper()
+            for a in request.answers
+        }
+
+        total_q = len(quiz.questions)
+        total_correct = 0
+        now_utc = datetime.now(UTC)
+
+        attempt = QuizAttempt(
+            id=uuid.uuid4(),
+            quiz_id=quiz.id,
+            user_id=user_id,
+            score=0.0,
+            total_correct=0,
+            total_incorrect=0,
+            completed_at=now_utc,
+        )
+        db.add(attempt)
+        await db.flush()
+
+        for q in quiz.questions:
+            selected = answers_map.get(q.id, "-")
+            is_correct = selected == q.correct_option.strip().upper()
+            if is_correct:
+                total_correct += 1
+            ans_row = QuizAttemptAnswer(
+                id=uuid.uuid4(),
+                attempt_id=attempt.id,
+                question_id=q.id,
+                selected_option=selected[:10] if selected else "-",
+                is_correct=is_correct,
+            )
+            db.add(ans_row)
+
+        total_incorrect = max(0, total_q - total_correct)
+        score = round((total_correct / total_q) * 100.0, 2) if total_q > 0 else 0.0
+        attempt.score = score
+        attempt.total_correct = total_correct
+        attempt.total_incorrect = total_incorrect
+
+        await db.commit()
+        return QuizAttemptCreateResponse(
+            attempt_id=attempt.id,
+            quiz_id=quiz.id,
+            score=score,
+            total_correct=total_correct,
+            total_incorrect=total_incorrect,
+            completed_at=now_utc,
+        )
 
 
 quiz_service = QuizService()

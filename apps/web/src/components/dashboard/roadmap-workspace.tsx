@@ -49,6 +49,11 @@ import {
   type RoadmapTaskStatusResponse,
   type RoadmapExamAttemptResponse,
 } from "@/lib/api/roadmaps"
+import {
+  extractFlashcardsFromQuizAttempt,
+  type ExtractedFlashcardCandidate,
+} from "@/lib/api/flashcards"
+import { FlashcardPreviewModal } from "@/components/dashboard/flashcard-preview-modal"
 
 interface RoadmapWorkspaceProps {
   documents: DocumentItem[]
@@ -211,6 +216,15 @@ export function RoadmapWorkspace({
   )
   const [examQuestionIndex, setExamQuestionIndex] = React.useState(0)
   const [examRemainingSeconds, setExamRemainingSeconds] = React.useState(900)
+
+  // Flashcard extraction from Final Subject Assessment mistakes
+  const [isExtractingExamFlashcards, setIsExtractingExamFlashcards] =
+    React.useState(false)
+  const [examFlashcardCandidates, setExamFlashcardCandidates] = React.useState<
+    ExtractedFlashcardCandidate[]
+  >([])
+  const [isExamFlashcardModalOpen, setIsExamFlashcardModalOpen] =
+    React.useState(false)
 
   // Form states
   const [isFormExpanded, setIsFormExpanded] = React.useState(true)
@@ -615,6 +629,28 @@ export function RoadmapWorkspace({
     }
   }
 
+  // Extract Flashcards from Final Subject Assessment Mistakes
+  const handleExtractExamFlashcards = async () => {
+    if (!examAttemptResult?.attempt_id || isExtractingExamFlashcards) return
+    setIsExtractingExamFlashcards(true)
+    setExamError(null)
+    try {
+      const res = await extractFlashcardsFromQuizAttempt(
+        examAttemptResult.attempt_id
+      )
+      setExamFlashcardCandidates(res.cards || [])
+      setIsExamFlashcardModalOpen(true)
+    } catch (err) {
+      setExamError(
+        err instanceof Error
+          ? err.message
+          : "Could not extract flashcards from assessment mistakes."
+      )
+    } finally {
+      setIsExtractingExamFlashcards(false)
+    }
+  }
+
   // Live time budget calculation
   const timeBudgetStats = React.useMemo(() => {
     if (!targetDate || todayTimestamp === null) return null
@@ -979,14 +1015,39 @@ export function RoadmapWorkspace({
                 </button>
               </>
             ) : (
-              <button
-                type="button"
-                onClick={() => setIsExamSessionOpen(false)}
-                className="h-9 px-4 rounded-xl bg-[#0A77FF] hover:bg-[#0A77FF]/90 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-[0_2px_10px_rgba(10,119,255,0.25)] transition-colors cursor-pointer"
-              >
-                <ArrowLeft className="h-3.5 w-3.5 stroke-[2]" />
-                <span>Back to Roadmap</span>
-              </button>
+              <>
+                {examAttemptResult && examAttemptResult.total_incorrect > 0 && (
+                  <button
+                    type="button"
+                    disabled={isExtractingExamFlashcards}
+                    onClick={() => void handleExtractExamFlashcards()}
+                    className="h-9 px-3.5 rounded-xl border border-[#0A77FF]/35 bg-[#0A77FF]/10 hover:bg-[#0A77FF]/15 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {isExtractingExamFlashcards ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Extracting...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="h-3.5 w-3.5 stroke-[2]" />
+                        <span>
+                          Extract Flashcards ({examAttemptResult.total_incorrect})
+                        </span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => setIsExamSessionOpen(false)}
+                  className="h-9 px-4 rounded-xl bg-[#0A77FF] hover:bg-[#0A77FF]/90 text-white text-xs font-semibold inline-flex items-center gap-1.5 shadow-[0_2px_10px_rgba(10,119,255,0.25)] transition-colors cursor-pointer"
+                >
+                  <ArrowLeft className="h-3.5 w-3.5 stroke-[2]" />
+                  <span>Back to Roadmap</span>
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1231,6 +1292,18 @@ export function RoadmapWorkspace({
             )}
           </div>
         </div>
+
+        <FlashcardPreviewModal
+          open={isExamFlashcardModalOpen}
+          onClose={() => setIsExamFlashcardModalOpen(false)}
+          candidates={examFlashcardCandidates}
+          sourceLabel={`Final Exam Mistakes · ${activeTree.roadmap.title}`}
+          defaultDocumentId={examQuiz.document_id}
+          defaultSubjectId={activeTree.roadmap.subject_id}
+          defaultDeckTitle={`Exam Mistakes: ${activeTree.roadmap.title}`}
+          documents={documents}
+          subjects={subjects}
+        />
       </div>
     )
   }
@@ -2553,7 +2626,29 @@ export function RoadmapWorkspace({
                       </div>
 
                       {examQuiz && (
-                        <div className="pt-3 border-t border-emerald-200/70 dark:border-emerald-900/50 flex items-center justify-end">
+                        <div className="pt-3 border-t border-emerald-200/70 dark:border-emerald-900/50 flex flex-wrap items-center justify-end gap-2.5">
+                          {examAttemptResult &&
+                            examAttemptResult.total_incorrect > 0 && (
+                              <button
+                                type="button"
+                                disabled={isExtractingExamFlashcards}
+                                onClick={() =>
+                                  void handleExtractExamFlashcards()
+                                }
+                                className="h-9 px-3.5 rounded-xl border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 hover:bg-emerald-50 text-xs font-semibold text-emerald-700 dark:text-emerald-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {isExtractingExamFlashcards ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Layers className="h-3.5 w-3.5" />
+                                )}
+                                <span>
+                                  Extract Flashcards (
+                                  {examAttemptResult.total_incorrect})
+                                </span>
+                              </button>
+                            )}
+
                           <button
                             type="button"
                             onClick={() => setIsExamSessionOpen(true)}
@@ -2621,6 +2716,28 @@ export function RoadmapWorkspace({
 
                       {(examQuiz || !isAlreadyRemediated) && (
                         <div className="pt-3.5 border-t border-rose-200/70 dark:border-rose-900/50 flex flex-wrap items-center justify-end gap-2.5">
+                          {examAttemptResult &&
+                            examAttemptResult.total_incorrect > 0 && (
+                              <button
+                                type="button"
+                                disabled={isExtractingExamFlashcards}
+                                onClick={() =>
+                                  void handleExtractExamFlashcards()
+                                }
+                                className="h-9 px-3.5 rounded-xl border border-rose-200 dark:border-rose-800 bg-white dark:bg-slate-900 hover:bg-rose-50 dark:hover:bg-rose-950/40 text-xs font-semibold text-rose-700 dark:text-rose-300 inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                              >
+                                {isExtractingExamFlashcards ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Layers className="h-3.5 w-3.5" />
+                                )}
+                                <span>
+                                  Extract Flashcards (
+                                  {examAttemptResult.total_incorrect})
+                                </span>
+                              </button>
+                            )}
+
                           {examQuiz && (
                             <button
                               type="button"
@@ -2713,6 +2830,20 @@ export function RoadmapWorkspace({
           </div>
         </div>
       </div>
+
+      {activeTree && (
+        <FlashcardPreviewModal
+          open={isExamFlashcardModalOpen}
+          onClose={() => setIsExamFlashcardModalOpen(false)}
+          candidates={examFlashcardCandidates}
+          sourceLabel={`Final Exam Mistakes · ${activeTree.roadmap.title}`}
+          defaultDocumentId={examQuiz?.document_id ?? activeTreeDocIds[0] ?? null}
+          defaultSubjectId={activeTree.roadmap.subject_id}
+          defaultDeckTitle={`Exam Mistakes: ${activeTree.roadmap.title}`}
+          documents={documents}
+          subjects={subjects}
+        />
+      )}
     </div>
   )
 }

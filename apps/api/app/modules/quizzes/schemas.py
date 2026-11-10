@@ -83,3 +83,22 @@ class QuizResponse(BaseModel):
     questions: list[QuizQuestionResponse]
 
     model_config = {"from_attributes": True}
+
+
+class QuizAttemptAnswerInput(BaseModel):
+    question_id: UUID
+    selected_option: str = Field(..., min_length=1, max_length=10)
+
+
+class QuizAttemptCreateRequest(BaseModel):
+    answers: list[QuizAttemptAnswerInput] = Field(default_factory=list)
+
+
+class QuizAttemptCreateResponse(BaseModel):
+    attempt_id: UUID
+    quiz_id: UUID
+    score: float
+    total_correct: int
+    total_incorrect: int
+    completed_at: datetime
+

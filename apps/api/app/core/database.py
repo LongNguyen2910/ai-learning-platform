@@ -37,16 +37,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def ensure_roadmap_exam_schema() -> None:
-    """Idempotently ensures Roadmap Final Assessment, Remediation, and User Avatar columns exist in PostgreSQL."""
+    """Idempotently ensures Roadmap Final Assessment, Remediation, User Avatar, and Flashcard Deck columns exist in PostgreSQL."""
     async with engine.connect() as conn:
         check_res = await conn.execute(
             text(
-                "SELECT table_name, column_name "
+                "SELECT table_name, column_name, is_nullable "
                 "FROM information_schema.columns "
-                "WHERE table_name IN ('users', 'roadmaps', 'quizzes', 'quiz_questions')"
+                "WHERE table_name IN ('users', 'roadmaps', 'quizzes', 'quiz_questions', 'flashcard_decks')"
             )
         )
-        existing = {(row[0], row[1]) for row in check_res.fetchall()}
+        rows = check_res.fetchall()
+        existing = {(row[0], row[1]) for row in rows}
+        deck_subject_nullable = any(
+            row[0] == "flashcard_decks"
+            and row[1] == "subject_id"
+            and row[2] == "YES"
+            for row in rows
+        )
 
     required = {
         ("users", "avatar_url"),
@@ -59,7 +66,7 @@ async def ensure_roadmap_exam_schema() -> None:
         ("quiz_questions", "source_document_id"),
         ("quiz_questions", "source_document_title"),
     }
-    if required.issubset(existing):
+    if required.issubset(existing) and deck_subject_nullable:
         return
 
     ddl_statements = [
@@ -74,6 +81,7 @@ async def ensure_roadmap_exam_schema() -> None:
         "CREATE INDEX IF NOT EXISTS ix_quizzes_roadmap_id ON quizzes (roadmap_id);",
         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_id UUID NULL;",
         "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_title VARCHAR(255) NULL;",
+        "ALTER TABLE flashcard_decks ALTER COLUMN subject_id DROP NOT NULL;",
     ]
     async with engine.begin() as conn:
         for stmt in ddl_statements:

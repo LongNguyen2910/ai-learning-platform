@@ -1,6 +1,15 @@
 import { getAuthHeaders } from "@/lib/api/documents"
+import type { ExtractedFlashcardCandidate } from "@/lib/api/flashcards"
 
-export type ChatMode = "socratic" | "normal" | "refusal"
+export type ChatMode = "socratic" | "normal" | "refusal" | "reverse_tutoring" | "standard"
+
+export interface ChatFlashcardSuggestion extends ExtractedFlashcardCandidate {
+  front_text: string
+  back_text: string
+  category?: string
+  trigger_reason?: string | null
+  target_page?: number | null
+}
 
 export interface ChatCitation {
   chunk_id: string
@@ -52,12 +61,17 @@ export interface ChatMessage {
   socratic_tier: number
   citations: ChatCitation[]
   created_at?: string | null
+  mode_metadata?: {
+    flashcard_suggestion?: ChatFlashcardSuggestion | null
+    [key: string]: unknown
+  }
   /** Client-only metadata for active session indicators */
   mode?: ChatMode
   solved?: boolean
   isStreaming?: boolean
   isError?: boolean
   retrievedChunks?: ChatCitation[]
+  flashcardSuggestion?: ChatFlashcardSuggestion | null
 }
 
 export interface ChatRequestPayload {
@@ -91,6 +105,7 @@ export interface SSEDoneData {
   socratic_tier: number
   solved: boolean
   citations?: ChatCitation[]
+  flashcard_suggestion?: ChatFlashcardSuggestion | null
 }
 
 export interface SSEErrorData {
@@ -101,6 +116,7 @@ export interface StreamChatCallbacks {
   onMeta?: (data: SSEMetaData) => void
   onCitations?: (data: SSECitationsData) => void
   onToken?: (data: SSETokenData) => void
+  onFlashcardSuggestion?: (data: ChatFlashcardSuggestion) => void
   onDone?: (data: SSEDoneData) => void
   onError?: (data: SSEErrorData) => void
   signal?: AbortSignal
@@ -267,6 +283,9 @@ function dispatchSSEBlock(block: string, callbacks: StreamChatCallbacks): void {
         break
       case "token":
         callbacks.onToken?.(parsed as SSETokenData)
+        break
+      case "flashcard_suggestion":
+        callbacks.onFlashcardSuggestion?.(parsed as ChatFlashcardSuggestion)
         break
       case "done":
         callbacks.onDone?.(parsed as SSEDoneData)

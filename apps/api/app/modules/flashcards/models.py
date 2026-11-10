@@ -39,10 +39,10 @@ class FlashcardDeck(Base):
         nullable=False,
         index=True,
     )
-    subject_id: Mapped[uuid.UUID] = mapped_column(
+    subject_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("subjects.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("subjects.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
     document_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -60,7 +60,7 @@ class FlashcardDeck(Base):
 
     # Relationships
     user: Mapped["User"] = relationship("User", back_populates="flashcard_decks")
-    subject: Mapped["Subject"] = relationship(
+    subject: Mapped[Optional["Subject"]] = relationship(
         "Subject", back_populates="flashcard_decks"
     )
     document: Mapped[Optional["Document"]] = relationship(

@@ -13,10 +13,10 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export type SidebarSection = "documents" | "roadmap" | "quizzes"
+export type SidebarSection = "documents" | "roadmap" | "quizzes" | "flashcards"
 
 interface NavItem {
-  id: SidebarSection | "flashcards"
+  id: SidebarSection
   label: string
   icon: React.ComponentType<{ className?: string }>
   badge?: string
@@ -43,8 +43,6 @@ const NAV_ITEMS: NavItem[] = [
     id: "flashcards",
     label: "Flashcards",
     icon: Layers,
-    badge: "Soon",
-    disabled: true,
   },
 ]
 
@@ -150,10 +148,8 @@ export function AppSidebar({
                 if (item.id === "documents") {
                   onSelectSection?.("documents")
                   onSelectDocumentsRoot?.()
-                } else if (item.id === "roadmap") {
-                  onSelectSection?.("roadmap")
-                } else if (item.id === "quizzes") {
-                  onSelectSection?.("quizzes")
+                } else {
+                  onSelectSection?.(item.id)
                 }
               }}
               title={collapsed ? item.label : undefined}

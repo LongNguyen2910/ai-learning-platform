@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Network,
   Target,
+  Layers,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
 import { resolveAvatarUrl } from "@/lib/api/profile"
@@ -162,6 +163,11 @@ export function TopHeader({
             <Target className="h-4 w-4 text-[#0A77FF] shrink-0" />
             <span>Quizzes</span>
           </div>
+        ) : activeSection === "flashcards" && !activeDocumentTitle ? (
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
+            <Layers className="h-4 w-4 text-[#0A77FF] shrink-0" />
+            <span>Flashcards</span>
+          </div>
         ) : (
           <>
             <button
@@ -182,6 +188,11 @@ export function TopHeader({
                 <>
                   <Target className="h-4 w-4 text-[#0A77FF] shrink-0" />
                   <span>Quizzes</span>
+                </>
+              ) : returnSection === "flashcards" && activeDocumentTitle ? (
+                <>
+                  <Layers className="h-4 w-4 text-[#0A77FF] shrink-0" />
+                  <span>Flashcards</span>
                 </>
               ) : (
                 <>

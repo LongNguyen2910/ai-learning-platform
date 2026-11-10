@@ -12,6 +12,7 @@ import { DocumentList } from "@/components/dashboard/document-list"
 import { DocumentViewer } from "@/components/dashboard/document-viewer"
 import { RoadmapWorkspace } from "@/components/dashboard/roadmap-workspace"
 import { QuizWorkspace } from "@/components/dashboard/quiz-workspace"
+import { FlashcardWorkspace } from "@/components/dashboard/flashcard-workspace"
 import {
   fetchDocuments,
   deleteDocument,
@@ -60,7 +61,8 @@ export function DashboardWorkspace() {
       if (
         saved === "documents" ||
         saved === "roadmap" ||
-        saved === "quizzes"
+        saved === "quizzes" ||
+        saved === "flashcards"
       ) {
         setActiveSection(saved)
         setReturnSection(saved)
@@ -429,7 +431,9 @@ export function DashboardWorkspace() {
                   ? "Back to Roadmap"
                   : returnSection === "quizzes"
                     ? "Back to Quizzes"
-                    : "Back to Documents"
+                    : returnSection === "flashcards"
+                      ? "Back to Flashcards"
+                      : "Back to Documents"
               }
               onCacheBlobUrl={handleCacheBlobUrl}
               onOpenRoadmapGenerator={(doc) => {
@@ -482,6 +486,28 @@ export function DashboardWorkspace() {
             subjects={subjects}
             onOpenDocumentAtPage={(docId, page) =>
               handleOpenDocumentAtPage(docId, page, "quizzes")
+            }
+            onSwitchToDocuments={() => {
+              setReturnSection("documents")
+              setActiveSection("documents")
+              setSelectedDocId(null)
+            }}
+          />
+        </main>
+
+        {/* Flashcards & Spaced Repetition Workspace */}
+        <main
+          className={
+            hasHydratedSection && activeSection === "flashcards"
+              ? "flex-1 min-h-0 overflow-hidden flex flex-col"
+              : "hidden"
+          }
+        >
+          <FlashcardWorkspace
+            documents={documents}
+            subjects={subjects}
+            onOpenDocumentAtPage={(docId, page) =>
+              handleOpenDocumentAtPage(docId, page, "flashcards")
             }
             onSwitchToDocuments={() => {
               setReturnSection("documents")

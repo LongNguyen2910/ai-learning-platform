@@ -103,3 +103,51 @@ class FlashcardBulkCreateResponse(BaseModel):
     deck_id: uuid.UUID
     created_count: int
     cards: list[FlashcardResponse]
+
+
+class FlashcardDeckCreateRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=150)
+    description: str | None = Field(default=None, max_length=1000)
+    subject_id: uuid.UUID | None = None
+    document_id: uuid.UUID | None = None
+
+
+class FlashcardDeckGenerateRequest(BaseModel):
+    document_id: uuid.UUID
+    num_cards: int = Field(default=8, ge=3, le=20)
+    page_start: int | None = Field(default=1, ge=1)
+    page_end: int | None = Field(default=None, ge=1)
+    title: str | None = Field(default=None, max_length=150)
+
+
+class FlashcardDeckSummaryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    subject_id: uuid.UUID | None = None
+    document_id: uuid.UUID | None = None
+    title: str
+    description: str | None = None
+    created_at: datetime
+    total_cards: int = 0
+    due_count: int = 0
+    mastered_count: int = 0
+
+
+class FlashcardDeckDetailResponse(FlashcardDeckSummaryResponse):
+    cards: list[FlashcardResponse] = Field(default_factory=list)
+
+
+class FlashcardUpdateRequest(BaseModel):
+    front_text: str = Field(..., min_length=1)
+    back_text: str = Field(..., min_length=1)
+    page_number: int | None = Field(default=None, ge=1)
+
+
+FlashcardReviewRating = Literal["again", "hard", "good", "easy"]
+
+
+class FlashcardReviewRequest(BaseModel):
+    rating: FlashcardReviewRating
+
