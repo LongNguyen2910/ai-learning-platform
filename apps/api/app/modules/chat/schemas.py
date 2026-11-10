@@ -114,7 +114,9 @@ class ChatRequest(BaseModel):
         description="Giới hạn truy vấn RAG theo trang PDF đang xem (tùy chọn)",
     )
     # Reverse Tutoring fields
-    reverse_action: Literal["suggest_topics", "start_session", "continue", "evaluate"] | None = Field(
+    reverse_action: (
+        Literal["suggest_topics", "start_session", "continue", "evaluate"] | None
+    ) = Field(
         default=None,
         description="Hành động điều khiển phiên Đảo vai",
     )
@@ -131,7 +133,9 @@ ChatMode = Literal["socratic", "normal", "refusal", "reverse_tutoring"]
 class SSEStreamEvent(BaseModel):
     """Envelope cho mỗi SSE event: `event: <event>\\ndata: <json(data)>\\n\\n`."""
 
-    event: Literal["meta", "citations", "token", "done", "error"]
+    event: Literal[
+        "meta", "citations", "token", "done", "error", "flashcard_suggestion"
+    ]
     data: dict[str, Any]
 
     def encode(self) -> str:

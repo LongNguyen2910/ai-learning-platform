@@ -1,6 +1,6 @@
 import uuid
 from datetime import date, datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import (
     Date,
@@ -45,13 +45,13 @@ class FlashcardDeck(Base):
         nullable=False,
         index=True,
     )
-    document_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("documents.id", ondelete="SET NULL"),
         nullable=True,
     )
     title: Mapped[str] = mapped_column(String(150), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -66,7 +66,7 @@ class FlashcardDeck(Base):
     document: Mapped[Optional["Document"]] = relationship(
         "Document", back_populates="flashcard_decks"
     )
-    flashcards: Mapped[List["Flashcard"]] = relationship(
+    flashcards: Mapped[list["Flashcard"]] = relationship(
         "Flashcard", back_populates="deck", cascade="all, delete-orphan"
     )
 
@@ -92,13 +92,9 @@ class Flashcard(Base):
     )
     front_text: Mapped[str] = mapped_column(Text, nullable=False)
     back_text: Mapped[str] = mapped_column(Text, nullable=False)
-    page_number: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    repetition_number: Mapped[int] = mapped_column(
-        Integer, default=0, nullable=False
-    )
-    easiness_factor: Mapped[float] = mapped_column(
-        Float, default=2.5, nullable=False
-    )
+    page_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    repetition_number: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    easiness_factor: Mapped[float] = mapped_column(Float, default=2.5, nullable=False)
     interval_days: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     due_date: Mapped[date] = mapped_column(
         Date,
@@ -112,9 +108,7 @@ class Flashcard(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("idx_flashcards_user_due", "user_id", "due_date"),
-    )
+    __table_args__ = (Index("idx_flashcards_user_due", "user_id", "due_date"),)
 
     # Relationships
     deck: Mapped["FlashcardDeck"] = relationship(

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -33,7 +34,11 @@ from app.modules.chat.schemas import (
     RetrievedChunkDTO,
     SSEStreamEvent,
 )
-from app.modules.chat.socratic_tiers import SOLVED_MARKER
+from app.modules.chat.socratic_tiers import (
+    FLASHCARD_MARKER_PREFIX,
+    FLASHCARD_MARKER_SUFFIX,
+    SOLVED_MARKER,
+)
 from app.modules.documents.vector_service import (
     DocumentVectorService,
     document_vector_service,
@@ -144,6 +149,79 @@ class MarkerStreamFilter:
         return remaining
 
 
+class FlashcardStreamFilter:
+    """Lọc marker gợi ý Flashcard khỏi luồng token và trích xuất payload JSON."""
+
+    def __init__(
+        self,
+        prefix: str = FLASHCARD_MARKER_PREFIX,
+        suffix: str = FLASHCARD_MARKER_SUFFIX,
+    ) -> None:
+        self.prefix = prefix
+        self.suffix = suffix
+        self.found = False
+        self.suggestion: dict[str, Any] | None = None
+        self._buffer = ""
+        self._capturing = False
+
+    def feed(self, chunk: str) -> str:
+        self._buffer += chunk
+        emitted = ""
+
+        while True:
+            if not self._capturing:
+                if self.prefix in self._buffer:
+                    idx = self._buffer.index(self.prefix)
+                    emitted += self._buffer[:idx]
+                    self._buffer = self._buffer[idx + len(self.prefix) :]
+                    self._capturing = True
+                else:
+                    holdback = 0
+                    for size in range(
+                        min(len(self.prefix) - 1, len(self._buffer)), 0, -1
+                    ):
+                        if self.prefix.startswith(self._buffer[-size:]):
+                            holdback = size
+                            break
+                    emit_upto = len(self._buffer) - holdback
+                    emitted += self._buffer[:emit_upto]
+                    self._buffer = self._buffer[emit_upto:]
+                    break
+            else:
+                if self.suffix in self._buffer:
+                    idx = self._buffer.index(self.suffix)
+                    json_str = self._buffer[:idx]
+                    self._buffer = self._buffer[idx + len(self.suffix) :]
+                    self._capturing = False
+                    self.found = True
+                    try:
+                        self.suggestion = json.loads(json_str.strip())
+                    except Exception as err:
+                        logger.warning(
+                            "Failed to parse flashcard suggestion: %s. Raw: %s",
+                            err,
+                            json_str,
+                        )
+                else:
+                    break
+
+        return emitted
+
+    def flush(self) -> str:
+        if self._capturing:
+            content = self._buffer
+            self._buffer = ""
+            try:
+                self.suggestion = json.loads(content.strip())
+                self.found = True
+                return ""
+            except Exception:
+                return self.prefix + content
+        remaining = self._buffer
+        self._buffer = ""
+        return remaining
+
+
 def _sse(event: str, data: dict[str, Any]) -> str:
     return SSEStreamEvent(event=event, data=data).encode()
 
@@ -216,7 +294,9 @@ class SocraticChatService:
     @staticmethod
     def to_chat_turns(history: list[ChatMessage]) -> list[ChatTurn]:
         return [
-            ChatTurn(role="user" if m.sender == SENDER_USER else "model", text=m.content)
+            ChatTurn(
+                role="user" if m.sender == SENDER_USER else "model", text=m.content
+            )
             for m in history
         ]
 
@@ -271,7 +351,9 @@ class SocraticChatService:
                 else "các khái niệm định lý trọng tâm"
             )
         elif target_concept:
-            retrieval_query = f"{target_concept}\n{request.content}"[:MAX_RETRIEVAL_QUERY_CHARS]
+            retrieval_query = f"{target_concept}\n{request.content}"[
+                :MAX_RETRIEVAL_QUERY_CHARS
+            ]
         else:
             retrieval_query = request.content[:MAX_RETRIEVAL_QUERY_CHARS]
 
@@ -318,14 +400,21 @@ class SocraticChatService:
         )
 
         parts: list[str] = []
+        flashcard_filter = FlashcardStreamFilter()
         try:
             async for piece in self.llm_client.stream(
                 system_prompt=system_prompt,
                 history=self.to_chat_turns(history),
                 user_message=request.content,
             ):
-                parts.append(piece)
-                yield _sse("token", {"text": piece})
+                emitted = flashcard_filter.feed(piece)
+                if emitted:
+                    parts.append(emitted)
+                    yield _sse("token", {"text": emitted})
+            tail = flashcard_filter.flush()
+            if tail:
+                parts.append(tail)
+                yield _sse("token", {"text": tail})
         except Exception:
             logger.exception("LLM streaming failed for session_id=%s", session.id)
             yield _sse(
@@ -362,6 +451,10 @@ class SocraticChatService:
             if rubric:
                 mode_metadata["rubric"] = rubric
 
+        if flashcard_filter.suggestion:
+            mode_metadata["flashcard_suggestion"] = flashcard_filter.suggestion
+            yield _sse("flashcard_suggestion", flashcard_filter.suggestion)
+
         saved = await self.repository.add_message(
             session_id=session.id,
             sender=SENDER_ASSISTANT,
@@ -382,6 +475,7 @@ class SocraticChatService:
                 "target_concept": target_concept,
                 "citations": cited,
                 "rubric": mode_metadata.get("rubric"),
+                "flashcard_suggestion": flashcard_filter.suggestion,
             },
         )
 
@@ -516,6 +610,7 @@ class SocraticChatService:
 
         # --- Gemini streaming ------------------------------------------------------
         marker_filter = MarkerStreamFilter(SOLVED_MARKER)
+        flashcard_filter = FlashcardStreamFilter()
         parts: list[str] = []
         try:
             async for piece in self.llm_client.stream(
@@ -523,11 +618,13 @@ class SocraticChatService:
                 history=self.to_chat_turns(history),
                 user_message=request.content,
             ):
-                emitted = marker_filter.feed(piece)
+                after_solved = marker_filter.feed(piece)
+                emitted = flashcard_filter.feed(after_solved)
                 if emitted:
                     parts.append(emitted)
                     yield _sse("token", {"text": emitted})
-            tail = marker_filter.flush()
+            tail_solved = marker_filter.flush()
+            tail = flashcard_filter.feed(tail_solved) + flashcard_filter.flush()
             if tail:
                 parts.append(tail)
                 yield _sse("token", {"text": tail})
@@ -559,6 +656,11 @@ class SocraticChatService:
             if c.citation_tag in answer or f"Trang {c.page_number}" in answer
         ]
 
+        mode_metadata: dict[str, Any] = {}
+        if flashcard_filter.suggestion:
+            mode_metadata["flashcard_suggestion"] = flashcard_filter.suggestion
+            yield _sse("flashcard_suggestion", flashcard_filter.suggestion)
+
         saved = await self.repository.add_message(
             session_id=session.id,
             sender=SENDER_ASSISTANT,
@@ -567,6 +669,7 @@ class SocraticChatService:
             citations=cited,
             token_count=_estimate_tokens(answer),
             mode=mode,
+            mode_metadata=mode_metadata,
         )
         yield _sse(
             "done",
@@ -575,6 +678,7 @@ class SocraticChatService:
                 "socratic_tier": next_tier,
                 "solved": solved,
                 "citations": cited,
+                "flashcard_suggestion": flashcard_filter.suggestion,
             },
         )
 
