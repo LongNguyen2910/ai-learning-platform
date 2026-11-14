@@ -68,6 +68,13 @@ export default function SettingsPage() {
     setAppearancePrefs(loadAppearancePreferences())
   }, [])
 
+  // Update and immediately persist Learning Preferences on interaction
+  const handleUpdateLearningPrefs = (patch: Partial<LearningPreferences>) => {
+    const updated = { ...learningPrefs, ...patch }
+    setLearningPrefs(updated)
+    saveLearningPreferences(updated)
+  }
+
   // Handle Save Learning Preferences
   const handleSaveLearning = (e: React.FormEvent) => {
     e.preventDefault()
@@ -257,10 +264,9 @@ export default function SettingsPage() {
                         role="switch"
                         aria-checked={learningPrefs.socraticEnabled}
                         onClick={() =>
-                          setLearningPrefs((prev) => ({
-                            ...prev,
-                            socraticEnabled: !prev.socraticEnabled,
-                          }))
+                          handleUpdateLearningPrefs({
+                            socraticEnabled: !learningPrefs.socraticEnabled,
+                          })
                         }
                         className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] ${
                           learningPrefs.socraticEnabled
@@ -307,10 +313,9 @@ export default function SettingsPage() {
                               key={tier.id}
                               type="button"
                               onClick={() =>
-                                setLearningPrefs((prev) => ({
-                                  ...prev,
+                                handleUpdateLearningPrefs({
                                   guidanceDepth: tier.id,
-                                }))
+                                })
                               }
                               className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer ${
                                 isSelected
@@ -359,10 +364,9 @@ export default function SettingsPage() {
                               key={hrs}
                               type="button"
                               onClick={() =>
-                                setLearningPrefs((prev) => ({
-                                  ...prev,
+                                handleUpdateLearningPrefs({
                                   dailyBudgetHours: hrs,
-                                }))
+                                })
                               }
                               className={`flex-1 h-9 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer tabular-nums ${
                                 learningPrefs.dailyBudgetHours === hrs
@@ -391,10 +395,9 @@ export default function SettingsPage() {
                               key={mode.id}
                               type="button"
                               onClick={() =>
-                                setLearningPrefs((prev) => ({
-                                  ...prev,
+                                handleUpdateLearningPrefs({
                                   sessionMode: mode.id,
-                                }))
+                                })
                               }
                               className={`h-9 px-1 rounded-lg text-xs font-medium transition-colors cursor-pointer truncate ${
                                 learningPrefs.sessionMode === mode.id

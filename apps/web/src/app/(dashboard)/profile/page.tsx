@@ -20,6 +20,8 @@ import {
   Loader2,
   ShieldCheck,
   Pencil,
+  Flame,
+  Trophy,
 } from "lucide-react"
 import {
   fetchUserProfile,
@@ -31,6 +33,12 @@ import {
 } from "@/lib/api/profile"
 import { fetchDocuments, type DocumentItem } from "@/lib/api/documents"
 import { fetchSubjects, fetchRoadmaps, type SubjectItem, type RoadmapItem } from "@/lib/api/roadmaps"
+import { DailyStreakModal } from "@/components/dashboard/daily-streak-modal"
+import {
+  getActiveMilestoneTier,
+  getNextMilestoneTier,
+  STREAK_MILESTONES,
+} from "@/lib/streak-milestones"
 
 export default function ProfilePage() {
   const router = useRouter()
@@ -66,6 +74,11 @@ export default function ProfilePage() {
   const [isChangingPass, setIsChangingPass] = React.useState(false)
   const [passwordSuccessMsg, setPasswordSuccessMsg] = React.useState<string | null>(null)
   const [passwordErrorMsg, setPasswordErrorMsg] = React.useState<string | null>(null)
+
+  // Streak & Milestone Rewards State
+  const [streakModalOpen, setStreakModalOpen] = React.useState(false)
+  const [equippingDays, setEquippingDays] = React.useState<number | null>(null)
+  const [streakRewardError, setStreakRewardError] = React.useState<string | null>(null)
 
   // Initial Data Load
   React.useEffect(() => {
@@ -111,6 +124,25 @@ export default function ProfilePage() {
       cancelled = true
     }
   }, [])
+
+  // Handle Equip Milestone Reward
+  const handleEquipMilestone = async (days: number) => {
+    if (!profile || (profile.longest_streak ?? 0) < days) return
+    setStreakRewardError(null)
+    setEquippingDays(days)
+    try {
+      const updated = await updateUserProfile({ equipped_milestone: days })
+      setProfile(updated)
+      localStorage.setItem("auth_user", JSON.stringify(updated))
+      window.dispatchEvent(new Event("auth-user-updated"))
+    } catch (err) {
+      setStreakRewardError(
+        err instanceof Error ? err.message : "Could not equip milestone reward."
+      )
+    } finally {
+      setEquippingDays(null)
+    }
+  }
 
   // Handle Avatar Upload
   const handleAvatarFileChange = async (
@@ -234,6 +266,21 @@ export default function ProfilePage() {
       })
     : "Recently"
 
+  // Streak & Milestone Calculations
+  const currentStreak = profile?.current_streak ?? 0
+  const longestStreak = profile?.longest_streak ?? 0
+  const totalCheckinDays = profile?.total_checkin_days ?? 0
+  const activeTier = getActiveMilestoneTier(
+    longestStreak,
+    profile?.equipped_milestone
+  )
+  const nextTier = getNextMilestoneTier(longestStreak)
+  const milestoneTarget = nextTier ? nextTier.days : 30
+  const milestoneProgressPercent = Math.min(
+    100,
+    Math.round((Math.min(longestStreak, milestoneTarget) / milestoneTarget) * 100)
+  )
+
   if (isLoadingProfile) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-[500px] text-slate-400 gap-3">
@@ -305,7 +352,9 @@ export default function ProfilePage() {
                   disabled={isUploadingAvatar}
                   title="Upload new profile picture"
                   aria-label="Upload new profile picture"
-                  className="group relative h-16 w-16 rounded-2xl bg-[#0A77FF] text-white flex items-center justify-center font-bold text-2xl shadow-xs shrink-0 select-none overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] focus-visible:ring-offset-2"
+                  className={`group relative h-16 w-16 rounded-2xl bg-[#0A77FF] text-white flex items-center justify-center font-bold text-2xl shadow-xs shrink-0 select-none overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] focus-visible:ring-offset-2 ${
+                    activeTier ? activeTier.previewRingClass : ""
+                  }`}
                 >
                   {resolvedAvatarUrl ? (
                     <img
@@ -340,7 +389,7 @@ export default function ProfilePage() {
                   <p className="text-xs text-slate-400 dark:text-slate-500 truncate mt-0.5">
                     {profile?.email}
                   </p>
-                  <div className="mt-2 flex items-center gap-2">
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
                     <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wider text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700">
                       {profile?.role || "Member"}
                     </span>
@@ -349,6 +398,16 @@ export default function ProfilePage() {
                       Active
                     </span>
                   </div>
+                  {activeTier && (
+                    <div className="mt-2">
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-semibold ${activeTier.badgeClass}`}
+                      >
+                        <activeTier.icon className="h-3 w-3 stroke-[2]" />
+                        <span>{activeTier.title}</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -466,6 +525,180 @@ export default function ProfilePage() {
                   {completedRoadmapsCount}
                 </p>
                 <p className="text-[11px] text-slate-400 mt-0.5">Completed roadmaps</p>
+              </div>
+            </div>
+
+            {/* 3B. Login Streak & Milestone Rewards Card */}
+            <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 shadow-2xs space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="h-8 w-8 rounded-lg bg-amber-500/10 dark:bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
+                    <Flame className="h-4 w-4 stroke-[2.2]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                      Login Streak & Milestone Rewards
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Earn permanent Rank Titles and Avatar Rings by logging in on consecutive days.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setStreakModalOpen(true)}
+                  className="h-8 px-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50/80 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 transition-all duration-150 cursor-pointer active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] self-start sm:self-auto shrink-0"
+                >
+                  <Trophy className="h-3.5 w-3.5 text-amber-500 stroke-[2]" />
+                  <span>Open Daily Check-in</span>
+                </button>
+              </div>
+
+              {/* Streak KPIs (3 Single-Source Telemetry Boxes) */}
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3.5">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Current Streak
+                  </p>
+                  <p className="mt-1 text-xl font-bold font-mono text-slate-900 dark:text-white tabular-nums">
+                    {currentStreak}d
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3.5">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Longest Streak
+                  </p>
+                  <p className="mt-1 text-xl font-bold font-mono text-slate-900 dark:text-white tabular-nums">
+                    {longestStreak}d
+                  </p>
+                </div>
+
+                <div className="rounded-xl border border-slate-200/70 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-3.5">
+                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Total Active Days
+                  </p>
+                  <p className="mt-1 text-xl font-bold font-mono text-slate-900 dark:text-white tabular-nums">
+                    {totalCheckinDays}d
+                  </p>
+                </div>
+              </div>
+
+              {/* Progress toward Next Milestone */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-medium text-slate-600 dark:text-slate-300">
+                    {nextTier
+                      ? `Next reward: ${nextTier.title} (${nextTier.ringName})`
+                      : "All 4 Milestone Rewards Unlocked"}
+                  </span>
+                  <span className="font-mono font-semibold text-slate-700 dark:text-slate-200 tabular-nums">
+                    {Math.min(longestStreak, milestoneTarget)}/{milestoneTarget}d
+                  </span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                  <div
+                    style={{ width: `${milestoneProgressPercent}%` }}
+                    className="h-full bg-[#0A77FF] transition-all duration-300 ease-out"
+                  />
+                </div>
+              </div>
+
+              {streakRewardError && (
+                <div className="rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400 flex items-start gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{streakRewardError}</span>
+                </div>
+              )}
+
+              {/* 4 Unlockable Milestone Tiers Grid */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {STREAK_MILESTONES.map((tier) => {
+                  const isUnlocked = longestStreak >= tier.days
+                  const isEquipped = activeTier?.days === tier.days
+                  const isSubmitting = equippingDays === tier.days
+                  const TierIcon = tier.icon
+
+                  return (
+                    <div
+                      key={tier.days}
+                      className={`rounded-xl border p-3.5 flex items-center justify-between gap-3 transition-colors duration-150 ${
+                        isEquipped
+                          ? "border-[#0A77FF]/45 bg-[#0A77FF]/[0.04] dark:bg-[#0A77FF]/[0.08]"
+                          : isUnlocked
+                          ? "border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900"
+                          : "border-slate-200/60 dark:border-slate-800/60 bg-slate-50/60 dark:bg-slate-950/40 opacity-85"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`h-10 w-10 rounded-full bg-[#0A77FF] text-white flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden ${
+                            isUnlocked
+                              ? tier.previewRingClass
+                              : "ring-2 ring-slate-200 dark:ring-slate-800 grayscale opacity-70"
+                          }`}
+                        >
+                          {resolvedAvatarUrl ? (
+                            <img
+                              src={resolvedAvatarUrl}
+                              alt={tier.title}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <span>{displayName.charAt(0).toUpperCase()}</span>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <TierIcon
+                              className={`h-3.5 w-3.5 shrink-0 ${
+                                isUnlocked ? tier.accentTextClass : "text-slate-400"
+                              }`}
+                            />
+                            <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                              {tier.title}
+                            </p>
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                            {tier.ringName} ·{" "}
+                            <span className="font-mono tabular-nums">{tier.days}d</span>
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0">
+                        {isEquipped ? (
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-[#0A77FF]/10 dark:bg-[#0A77FF]/20 px-2.5 py-1.5 text-[11px] font-semibold text-[#0A77FF] dark:text-sky-300">
+                            <Check className="h-3 w-3 stroke-[2.4]" />
+                            <span>Equipped</span>
+                          </span>
+                        ) : isUnlocked ? (
+                          <button
+                            type="button"
+                            disabled={equippingDays !== null}
+                            onClick={() => void handleEquipMilestone(tier.days)}
+                            className="h-7 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-[11px] font-semibold text-slate-800 dark:text-slate-200 inline-flex items-center gap-1 transition-all duration-150 cursor-pointer active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] disabled:opacity-50"
+                          >
+                            {isSubmitting ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <span>Equip</span>
+                            )}
+                          </button>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 dark:bg-slate-800 px-2 py-1 text-[11px] font-mono font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+                            <Lock className="h-3 w-3" />
+                            <span>
+                              {longestStreak}/{tier.days}d
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
@@ -717,6 +950,13 @@ export default function ProfilePage() {
           </div>
         </div>
       </div>
+
+      <DailyStreakModal
+        isOpen={streakModalOpen}
+        onClose={() => setStreakModalOpen(false)}
+        user={profile}
+        onUserUpdated={(updated) => setProfile(updated)}
+      />
     </div>
   )
 }

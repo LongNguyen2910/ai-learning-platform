@@ -1,3 +1,4 @@
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import uuid
 from uuid import UUID
@@ -14,6 +15,7 @@ from app.modules.auth.exceptions import (
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
+    DailyCheckinResponse,
     DeleteAccountRequest,
     TokenResponse,
     UserLoginRequest,
@@ -31,6 +33,7 @@ ALLOWED_AVATAR_TYPES: dict[str, str] = {
     "image/gif": ".gif",
 }
 MAX_AVATAR_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB
+MILESTONE_DAYS = (3, 7, 14, 30)
 
 
 class AuthService:
@@ -98,10 +101,72 @@ class AuthService:
             user.full_name = req.full_name.strip() if req.full_name else None
         if "avatar_url" in req.model_fields_set:
             user.avatar_url = req.avatar_url.strip() if req.avatar_url else None
+        if "equipped_milestone" in req.model_fields_set:
+            if req.equipped_milestone is not None and (
+                req.equipped_milestone not in MILESTONE_DAYS
+                or req.equipped_milestone > (user.longest_streak or 0)
+            ):
+                raise ValueError("Milestone reward is not unlocked yet.")
+            user.equipped_milestone = req.equipped_milestone
         db.add(user)
         await db.commit()
         await db.refresh(user)
         return user
+
+    async def process_daily_checkin(
+        self,
+        db: AsyncSession,
+        user: User,
+        client_date: date | None = None,
+    ) -> DailyCheckinResponse:
+        server_today = datetime.now(timezone.utc).date()
+        if client_date is not None and abs((client_date - server_today).days) <= 1:
+            today = client_date
+        else:
+            today = server_today
+
+        if user.last_checkin_date == today:
+            return DailyCheckinResponse(
+                user=UserResponse.model_validate(user),
+                is_new_day_checkin=False,
+                newly_unlocked_milestone=None,
+                streak_reset=False,
+            )
+
+        if user.last_checkin_date == today - timedelta(days=1):
+            user.current_streak = (user.current_streak or 0) + 1
+            streak_reset = False
+        else:
+            streak_reset = bool(
+                user.last_checkin_date is not None and (user.current_streak or 0) > 1
+            )
+            user.current_streak = 1
+
+        user.total_checkin_days = (user.total_checkin_days or 0) + 1
+        user.last_checkin_date = today
+
+        newly_unlocked: int | None = None
+        if user.current_streak > (user.longest_streak or 0):
+            user.longest_streak = user.current_streak
+            if user.current_streak in MILESTONE_DAYS:
+                newly_unlocked = user.current_streak
+                user.equipped_milestone = newly_unlocked
+
+        if user.equipped_milestone is None:
+            unlocked = [m for m in MILESTONE_DAYS if m <= (user.longest_streak or 0)]
+            if unlocked:
+                user.equipped_milestone = unlocked[-1]
+
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+
+        return DailyCheckinResponse(
+            user=UserResponse.model_validate(user),
+            is_new_day_checkin=True,
+            newly_unlocked_milestone=newly_unlocked,
+            streak_reset=streak_reset,
+        )
 
     async def upload_avatar(
         self,

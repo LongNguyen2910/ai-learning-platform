@@ -49,8 +49,26 @@ export function saveLearningPreferences(prefs: LearningPreferences): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(LEARNING_PREFS_KEY, JSON.stringify(prefs))
+    window.dispatchEvent(new Event("learning-preferences-updated"))
   } catch {
     // Ignore localStorage storage quota failures
+  }
+}
+
+export function applyAppearanceTheme(theme: AppTheme): void {
+  if (typeof window === "undefined") return
+  const root = document.documentElement
+  if (theme === "dark") {
+    root.classList.add("dark")
+  } else if (theme === "light") {
+    root.classList.remove("dark")
+  } else {
+    // System mode
+    if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      root.classList.add("dark")
+    } else {
+      root.classList.remove("dark")
+    }
   }
 }
 
@@ -69,21 +87,8 @@ export function saveAppearancePreferences(prefs: AppearancePreferences): void {
   if (typeof window === "undefined") return
   try {
     localStorage.setItem(APPEARANCE_PREFS_KEY, JSON.stringify(prefs))
-
-    // Apply theme immediately to HTML root element
-    const root = document.documentElement
-    if (prefs.theme === "dark") {
-      root.classList.add("dark")
-    } else if (prefs.theme === "light") {
-      root.classList.remove("dark")
-    } else {
-      // System mode
-      if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-        root.classList.add("dark")
-      } else {
-        root.classList.remove("dark")
-      }
-    }
+    applyAppearanceTheme(prefs.theme)
+    window.dispatchEvent(new Event("appearance-preferences-updated"))
   } catch {
     // Ignore localStorage storage quota failures
   }

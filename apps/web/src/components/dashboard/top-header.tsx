@@ -12,18 +12,20 @@ import {
   Network,
   Target,
   Layers,
+  Flame,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
-import { resolveAvatarUrl } from "@/lib/api/profile"
+import {
+  resolveAvatarUrl,
+  type UserProfileResponse,
+} from "@/lib/api/profile"
+import {
+  getActiveMilestoneTier,
+  getLocalDateString,
+  getYesterdayDateString,
+} from "@/lib/streak-milestones"
+import { DailyStreakModal } from "@/components/dashboard/daily-streak-modal"
 import type { SidebarSection } from "@/components/dashboard/app-sidebar"
-
-interface AuthUser {
-  id: string
-  email: string
-  full_name?: string | null
-  avatar_url?: string | null
-  role?: string
-}
 
 interface TopHeaderProps {
   activeSection?: SidebarSection
@@ -41,17 +43,26 @@ export function TopHeader({
   const router = useRouter()
   const [menuOpen, setMenuOpen] = React.useState(false)
   const [noticeMessage] = React.useState<string | null>(null)
-  const [currentUser, setCurrentUser] = React.useState<AuthUser | null>(null)
+  const [currentUser, setCurrentUser] = React.useState<UserProfileResponse | null>(null)
+  const [streakModalOpen, setStreakModalOpen] = React.useState(false)
+  const [dateBounds, setDateBounds] = React.useState<{
+    today: string
+    yesterday: string
+  } | null>(null)
   const dropdownRef = React.useRef<HTMLDivElement>(null)
 
-  // Load current user from localStorage immediately, then sync with GET /auth/me
+  // Load cached user immediately, then sync /auth/me and auto-open Daily Login modal on a new unchecked-in day
   React.useEffect(() => {
     if (typeof window === "undefined") return
+
+    const localToday = getLocalDateString()
+    const localYesterday = getYesterdayDateString()
+    setDateBounds({ today: localToday, yesterday: localYesterday })
 
     try {
       const cached = localStorage.getItem("auth_user")
       if (cached) {
-        const parsed = JSON.parse(cached) as AuthUser
+        const parsed = JSON.parse(cached) as UserProfileResponse
         if (parsed && (parsed.full_name || parsed.email)) {
           setCurrentUser(parsed)
         }
@@ -67,30 +78,40 @@ export function TopHeader({
     const apiUrl =
       process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
-    const fetchMe = async () => {
+    const fetchMeAndPromptNewDay = async () => {
       try {
         const response = await fetch(`${apiUrl}/auth/me`, {
           method: "GET",
           headers: getAuthHeaders({ Accept: "application/json" }),
+          cache: "no-store",
         })
         if (!response.ok) return
-        const data = (await response.json()) as AuthUser
+        const data = (await response.json()) as UserProfileResponse
         if (!cancelled && data) {
           setCurrentUser(data)
           localStorage.setItem("auth_user", JSON.stringify(data))
+
+          const todayStr = getLocalDateString()
+          if (data.last_checkin_date !== todayStr) {
+            const autoShownKey = `daily_streak_autoshow_${data.id}_${todayStr}`
+            if (!localStorage.getItem(autoShownKey)) {
+              localStorage.setItem(autoShownKey, "1")
+              setStreakModalOpen(true)
+            }
+          }
         }
       } catch {
         // Keep cached user if backend is temporarily unreachable
       }
     }
 
-    void fetchMe()
+    void fetchMeAndPromptNewDay()
 
     const handleUserUpdated = () => {
       try {
         const latest = localStorage.getItem("auth_user")
         if (latest) {
-          const parsed = JSON.parse(latest) as AuthUser
+          const parsed = JSON.parse(latest) as UserProfileResponse
           setCurrentUser(parsed)
         }
       } catch {
@@ -146,9 +167,24 @@ export function TopHeader({
     "Account"
   const displayEmail = currentUser?.email || "Personal Account"
   const resolvedAvatar = resolveAvatarUrl(currentUser?.avatar_url)
+  const todayStr = dateBounds?.today ?? ""
+  const yesterdayStr = dateBounds?.yesterday ?? ""
+  const checkedInToday =
+    Boolean(todayStr) && currentUser?.last_checkin_date === todayStr
+  const currentStreak =
+    Boolean(todayStr) &&
+    (checkedInToday || currentUser?.last_checkin_date === yesterdayStr)
+      ? currentUser?.current_streak ?? 0
+      : 0
+  const longestStreak = currentUser?.longest_streak ?? 0
+  const activeTier = getActiveMilestoneTier(
+    longestStreak,
+    currentUser?.equipped_milestone
+  )
 
   return (
-    <header className="h-16 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm px-6 flex items-center justify-between shrink-0 z-20">
+    <>
+      <header className="h-16 w-full border-b border-slate-200/80 dark:border-slate-800/80 bg-white/95 dark:bg-slate-950/95 backdrop-blur-sm px-6 flex items-center justify-between shrink-0 z-20">
       {/* Left: Context Breadcrumb */}
       <div className="flex items-center gap-2 min-w-0">
         {!activeSection && !activeDocumentTitle ? (
@@ -214,8 +250,8 @@ export function TopHeader({
         )}
       </div>
 
-      {/* Right: Subtle notification pill & User Profile Dropdown */}
-      <div className="flex items-center gap-3">
+      {/* Right: Subtle notification pill, Streak trigger & User Profile Dropdown */}
+      <div className="flex items-center gap-2.5">
         {noticeMessage && (
           <div
             role="status"
@@ -226,6 +262,36 @@ export function TopHeader({
           </div>
         )}
 
+        {/* Daily Streak Trigger (directly left of top-right Profile button) */}
+        <button
+          type="button"
+          onClick={() => setStreakModalOpen(true)}
+          aria-label={`Daily login streak: ${currentStreak} days`}
+          title={
+            checkedInToday
+              ? "Checked in today · View daily login"
+              : "Check in today · View daily login"
+          }
+          className="h-10 px-3 rounded-full border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 flex items-center gap-1.5 transition-all duration-150 cursor-pointer active:scale-[0.97] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]"
+        >
+          <Flame
+            className={`h-4 w-4 stroke-[2] shrink-0 transition-colors duration-150 ${
+              checkedInToday
+                ? "text-amber-500 fill-amber-500/20"
+                : "text-slate-400"
+            }`}
+          />
+          <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 tabular-nums">
+            {currentStreak}d
+          </span>
+          {activeTier && (
+            <span
+              className={`h-1.5 w-1.5 rounded-full shrink-0 ${activeTier.dotClass}`}
+              aria-hidden="true"
+            />
+          )}
+        </button>
+
         <div className="relative" ref={dropdownRef}>
           <button
             type="button"
@@ -235,7 +301,11 @@ export function TopHeader({
             aria-label="User profile menu"
             className="flex items-center gap-2.5 rounded-full p-1 pr-3 border border-slate-200/90 dark:border-slate-800 bg-slate-50/70 hover:bg-slate-100 dark:bg-slate-900 dark:hover:bg-slate-800 transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF] active:scale-[0.98]"
           >
-            <div className="h-8 w-8 rounded-full bg-[#0A77FF] text-white flex items-center justify-center shadow-xs shrink-0 font-bold text-xs overflow-hidden">
+            <div
+              className={`h-8 w-8 rounded-full bg-[#0A77FF] text-white flex items-center justify-center shadow-xs shrink-0 font-bold text-xs overflow-hidden ${
+                activeTier ? activeTier.ringClass : ""
+              }`}
+            >
               {resolvedAvatar ? (
                 <img
                   src={resolvedAvatar}
@@ -270,6 +340,14 @@ export function TopHeader({
                 <p className="text-[11px] text-slate-400 dark:text-slate-500 truncate">
                   {displayEmail}
                 </p>
+                {activeTier && (
+                  <div
+                    className={`mt-1.5 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold ${activeTier.badgeClass}`}
+                  >
+                    <activeTier.icon className="h-3 w-3 stroke-[2]" />
+                    <span>{activeTier.title}</span>
+                  </div>
+                )}
               </div>
 
               <button
@@ -317,6 +395,14 @@ export function TopHeader({
           )}
         </div>
       </div>
-    </header>
+      </header>
+
+      <DailyStreakModal
+        isOpen={streakModalOpen}
+        onClose={() => setStreakModalOpen(false)}
+        user={currentUser}
+        onUserUpdated={(updated) => setCurrentUser(updated)}
+      />
+    </>
   )
 }

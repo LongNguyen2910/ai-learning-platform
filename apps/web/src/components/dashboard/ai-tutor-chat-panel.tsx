@@ -40,6 +40,7 @@ import {
 } from "@/lib/api/chat"
 import { FlashcardPreviewModal } from "@/components/dashboard/flashcard-preview-modal"
 import { ChatMarkdownRenderer } from "@/components/dashboard/chat-markdown-renderer"
+import { loadLearningPreferences } from "@/lib/api/settings"
 
 interface AiTutorChatPanelProps {
   document: DocumentItem
@@ -56,28 +57,24 @@ const SUGGESTED_PROMPTS = [
     label: "Tóm tắt nội dung cốt lõi & dẫn nguồn trang",
     prompt:
       "Hãy tóm tắt các định nghĩa, định lý cốt lõi trong tài liệu này và trích dẫn số trang tương ứng.",
-    socratic: false,
   },
   {
     icon: Lightbulb,
     label: "Giải thích công thức toán học theo từng bước",
     prompt:
       "Hãy giải thích ý nghĩa và cách áp dụng các công thức toán học quan trọng trong tài liệu.",
-    socratic: false,
   },
   {
     icon: GraduationCap,
-    label: "Luyện giải bài tập theo Socratic 3 tầng",
+    label: "Hướng dẫn giải bài tập áp dụng kiến thức",
     prompt:
-      "Hướng dẫn mình giải bài tập áp dụng kiến thức ở trang hiện tại theo phương pháp gợi mở từng bước.",
-    socratic: true,
+      "Hãy hướng dẫn mình giải bài tập áp dụng kiến thức ở trang hiện tại.",
   },
   {
     icon: HelpCircle,
     label: "Đặt câu hỏi kiểm tra mức độ hiểu bài",
     prompt:
-      "Hãy đặt cho mình một câu hỏi Socratic để kiểm tra xem mình đã hiểu đúng nội dung trang này chưa.",
-    socratic: true,
+      "Hãy đặt cho mình một câu hỏi để kiểm tra xem mình đã hiểu đúng nội dung trang này chưa.",
   },
 ]
 
@@ -185,6 +182,29 @@ export function AiTutorChatPanel({
     })
   }, [])
 
+  // Sync Default Socratic Guidance setting from /settings (on mount and whenever changed)
+  React.useEffect(() => {
+    const syncSocraticFromPrefs = () => {
+      const enabled = loadLearningPreferences().socraticEnabled
+      setSocraticEnabled(enabled)
+      if (!enabled) {
+        setCurrentTier(0)
+      }
+    }
+
+    syncSocraticFromPrefs()
+
+    window.addEventListener("learning-preferences-updated", syncSocraticFromPrefs)
+    window.addEventListener("storage", syncSocraticFromPrefs)
+    return () => {
+      window.removeEventListener(
+        "learning-preferences-updated",
+        syncSocraticFromPrefs
+      )
+      window.removeEventListener("storage", syncSocraticFromPrefs)
+    }
+  }, [])
+
   React.useEffect(() => {
     if (panelMode === "chat") {
       scrollToBottom(true)
@@ -218,12 +238,11 @@ export function AiTutorChatPanel({
           const history = await fetchChatMessages(latest.id, 60)
           if (cancelled) return
           setMessages(history)
-          // Restore last assistant socratic_tier from history
+          // Restore last assistant socratic_tier from history without overriding user Socratic toggle
           for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].sender === "assistant") {
               const t = history[i].socratic_tier || 0
               setCurrentTier(t)
-              if (t > 0) setSocraticEnabled(true)
               break
             }
           }
@@ -265,9 +284,6 @@ export function AiTutorChatPanel({
         }
       }
       setCurrentTier(restoredTier)
-      if (restoredTier > 0) {
-        setSocraticEnabled(true)
-      }
     } catch (err) {
       setChatError(
         err instanceof Error ? err.message : "Không thể tải lịch sử hội thoại."
@@ -335,9 +351,6 @@ export function AiTutorChatPanel({
               }
             }
             setCurrentTier(restoredTier)
-            if (restoredTier > 0) {
-              setSocraticEnabled(true)
-            }
           } finally {
             setIsLoadingHistory(false)
           }
@@ -361,7 +374,6 @@ export function AiTutorChatPanel({
     async (
       rawText: string,
       options?: {
-        forceSocratic?: boolean
         newQuestion?: boolean
         requestedTier?: number | null
       }
@@ -369,12 +381,10 @@ export function AiTutorChatPanel({
       const text = rawText.trim()
       if (!text || isStreaming) return
 
-      const effectiveSocratic =
-        options?.forceSocratic !== undefined
-          ? options.forceSocratic
-          : socraticEnabled
-      if (options?.forceSocratic !== undefined) {
-        setSocraticEnabled(options.forceSocratic)
+      const effectiveSocratic = loadLearningPreferences().socraticEnabled
+      setSocraticEnabled(effectiveSocratic)
+      if (!effectiveSocratic) {
+        setCurrentTier(0)
       }
 
       const effectiveNewQuestion =
@@ -807,65 +817,10 @@ export function AiTutorChatPanel({
          ==================================================================== */}
       {panelMode === "chat" ? (
         <>
-          {/* Socratic Mode Control Bar & 3-Tier Visual Progress */}
-          <div className="px-3.5 py-2.5 border-b border-slate-200/70 dark:border-slate-800/70 bg-slate-50/40 dark:bg-slate-900/30 space-y-2 shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <div
-                  className={`h-6 w-6 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
-                    socraticEnabled
-                      ? "bg-indigo-600 text-white shadow-xs"
-                      : "bg-slate-200/80 dark:bg-slate-800 text-slate-500"
-                  }`}
-                >
-                  <GraduationCap className="h-3.5 w-3.5 stroke-[2]" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">
-                      Chế độ Socratic Gia sư
-                    </span>
-                    <span
-                      className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                        socraticEnabled
-                          ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
-                          : "bg-slate-200/70 text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                      }`}
-                    >
-                      {socraticEnabled ? "BẬT" : "TẮT"}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {socraticEnabled
-                      ? "Gợi mở 3 tầng (Lý thuyết → Bài mẫu → Từng bước), không giải hộ"
-                      : "Giải thích lý thuyết nhanh • Chặn giải hộ bài tập trực tiếp"}
-                  </p>
-                </div>
-              </div>
-
-              {/* Toggle Switch */}
-              <button
-                type="button"
-                role="switch"
-                aria-checked={socraticEnabled}
-                onClick={() => setSocraticEnabled((prev) => !prev)}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                  socraticEnabled
-                    ? "bg-indigo-600"
-                    : "bg-slate-300 dark:bg-slate-700"
-                }`}
-              >
-                <span
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
-                    socraticEnabled ? "translate-x-5" : "translate-x-0"
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Sequential Socratic Actions when in an active problem */}
-            {socraticEnabled && currentTier > 0 && (
-              <div className="flex items-center justify-between gap-1.5 pt-0.5">
+          {/* Sequential Socratic Actions when in an active problem */}
+          {socraticEnabled && currentTier > 0 && (
+            <div className="px-3.5 py-2 border-b border-slate-200/70 dark:border-slate-800/70 bg-slate-50/40 dark:bg-slate-900/30 shrink-0">
+              <div className="flex items-center justify-between gap-1.5">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {currentTier < 3 && (
                     <button
@@ -875,7 +830,6 @@ export function AiTutorChatPanel({
                         void sendMessage(
                           "Mình vẫn chưa hiểu rõ, bạn gợi ý thêm bằng ví dụ hoặc bước cụ thể hơn giúp mình nhé!",
                           {
-                            forceSocratic: true,
                             requestedTier: Math.min(currentTier + 1, 3),
                           }
                         )
@@ -909,8 +863,8 @@ export function AiTutorChatPanel({
                   </button>
                 </div>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
@@ -953,19 +907,12 @@ export function AiTutorChatPanel({
                           key={item.label}
                           type="button"
                           onClick={() => {
-                            void sendMessage(item.prompt, {
-                              forceSocratic: item.socratic,
-                            })
+                            void sendMessage(item.prompt)
                           }}
                           className="w-full flex items-center gap-3 rounded-xl border border-slate-200/80 dark:border-slate-800/80 bg-slate-50/60 dark:bg-slate-900/50 hover:bg-indigo-50/50 dark:hover:bg-slate-800/80 hover:border-indigo-500/40 px-3.5 py-2.5 text-xs font-medium text-slate-700 dark:text-slate-200 transition-all duration-150 cursor-pointer text-left active:scale-[0.99]"
                         >
                           <Icon className="h-4 w-4 text-indigo-600 dark:text-indigo-400 shrink-0 stroke-[1.8]" />
                           <span className="flex-1 truncate">{item.label}</span>
-                          {item.socratic && (
-                            <span className="rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 px-1.5 py-0.5 text-[10px] font-semibold shrink-0">
-                              Socratic
-                            </span>
-                          )}
                         </button>
                       )
                     })}
@@ -1066,37 +1013,6 @@ export function AiTutorChatPanel({
                           </span>
                         </div>
                       ) : null}
-
-                      {/* 1-Click CTA when Homework Guardrail Refuses Direct Solution */}
-                      {isRefusal &&
-                        msg.socratic_tier === 0 &&
-                        !msg.isStreaming && (
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const promptToRetry =
-                                  lastBlockedPrompt ||
-                                  [...messages]
-                                    .reverse()
-                                    .find((m) => m.sender === "user")?.content
-                                setSocraticEnabled(true)
-                                if (promptToRetry) {
-                                  void sendMessage(promptToRetry, {
-                                    forceSocratic: true,
-                                    newQuestion: true,
-                                  })
-                                }
-                              }}
-                              className="w-full py-2 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs inline-flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer active:scale-[0.99]"
-                            >
-                              <GraduationCap className="h-4 w-4" />
-                              <span>
-                                Bật Chế độ Socratic & Nhận gợi ý Tầng 1 ngay
-                              </span>
-                            </button>
-                          </div>
-                        )}
 
                       {/* Inline Flashcard Suggestion Card */}
                       {suggestion &&

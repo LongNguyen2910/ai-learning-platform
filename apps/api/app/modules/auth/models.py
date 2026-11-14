@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, func, text
+from sqlalchemy import Boolean, Date, DateTime, Integer, String, Text, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -44,6 +44,17 @@ class User(Base):
     used_token_today: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
     )
+    current_streak: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    longest_streak: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    total_checkin_days: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
+    last_checkin_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    equipped_milestone: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +20,7 @@ class UserLoginRequest(BaseModel):
 class UserUpdateRequest(BaseModel):
     full_name: str | None = Field(default=None, max_length=100)
     avatar_url: str | None = Field(default=None)
+    equipped_milestone: int | None = Field(default=None)
 
 
 class ChangePasswordRequest(BaseModel):
@@ -46,7 +47,19 @@ class UserResponse(BaseModel):
     is_active: bool
     daily_token_limit: int
     used_token_today: int
+    current_streak: int = 0
+    longest_streak: int = 0
+    total_checkin_days: int = 0
+    last_checkin_date: date | None = None
+    equipped_milestone: int | None = None
     created_at: datetime
+
+
+class DailyCheckinResponse(BaseModel):
+    user: UserResponse
+    is_new_day_checkin: bool
+    newly_unlocked_milestone: int | None = None
+    streak_reset: bool = False
 
 
 class TokenResponse(BaseModel):

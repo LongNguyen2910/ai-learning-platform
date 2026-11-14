@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 import re
 from typing import Annotated
@@ -17,6 +18,7 @@ from app.modules.auth.exceptions import (
 from app.modules.auth.models import User
 from app.modules.auth.schemas import (
     ChangePasswordRequest,
+    DailyCheckinResponse,
     DeleteAccountRequest,
     MessageResponse,
     TokenResponse,
@@ -88,6 +90,20 @@ async def get_me(
     return UserResponse.model_validate(current_user)
 
 
+@router.post(
+    "/me/daily-checkin",
+    response_model=DailyCheckinResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Record daily login check-in and update user streak",
+)
+async def daily_checkin(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    local_date: date | None = None,
+) -> DailyCheckinResponse:
+    return await auth_service.process_daily_checkin(db, current_user, local_date)
+
+
 @router.patch(
     "/me",
     response_model=UserResponse,
@@ -99,8 +115,14 @@ async def update_me(
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserResponse:
-    updated = await auth_service.update_profile(db, current_user, req)
-    return UserResponse.model_validate(updated)
+    try:
+        updated = await auth_service.update_profile(db, current_user, req)
+        return UserResponse.model_validate(updated)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.post(

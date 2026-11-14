@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from app.modules.chat.guardrails import (
-    HOMEWORK_REFUSAL_MESSAGE,
     JAILBREAK_REFUSAL_MESSAGE,
     GuardrailResult,
     analyze_query,
@@ -520,17 +519,13 @@ class SocraticChatService:
             mode=saved_user_mode,
         )
 
-        # --- Toggle OFF + homework/jailbreak: từ chối tức thì, 0 LLM token -------
+        # --- Toggle OFF + jailbreak: từ chối tức thì; bài tập được giải trực tiếp ---
         if (
             not request.socratic_enabled
             and request.mode != "socratic"
-            and guard.should_block_direct_answer
+            and guard.is_jailbreak
         ):
-            refusal = (
-                JAILBREAK_REFUSAL_MESSAGE
-                if guard.is_jailbreak and not guard.is_homework
-                else HOMEWORK_REFUSAL_MESSAGE
-            )
+            refusal = JAILBREAK_REFUSAL_MESSAGE
             yield _sse(
                 "meta",
                 {

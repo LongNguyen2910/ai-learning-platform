@@ -57,6 +57,11 @@ async def ensure_roadmap_exam_schema() -> None:
 
     required = {
         ("users", "avatar_url"),
+        ("users", "current_streak"),
+        ("users", "longest_streak"),
+        ("users", "total_checkin_days"),
+        ("users", "last_checkin_date"),
+        ("users", "equipped_milestone"),
         ("roadmaps", "exam_status"),
         ("roadmaps", "latest_exam_score"),
         ("roadmaps", "iteration"),
@@ -71,6 +76,11 @@ async def ensure_roadmap_exam_schema() -> None:
 
     ddl_statements = [
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INTEGER NOT NULL DEFAULT 0;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_streak INTEGER NOT NULL DEFAULT 0;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS total_checkin_days INTEGER NOT NULL DEFAULT 0;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_checkin_date DATE NULL;",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_milestone INTEGER NULL;",
         "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS exam_status VARCHAR(20) NOT NULL DEFAULT 'locked';",
         "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS latest_exam_score DOUBLE PRECISION NULL;",
         "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS iteration INTEGER NOT NULL DEFAULT 1;",

@@ -14,12 +14,25 @@ export interface UserProfileResponse {
   is_active: boolean
   daily_token_limit: number
   used_token_today: number
+  current_streak: number
+  longest_streak: number
+  total_checkin_days: number
+  last_checkin_date?: string | null
+  equipped_milestone?: number | null
   created_at: string
+}
+
+export interface DailyCheckinResponse {
+  user: UserProfileResponse
+  is_new_day_checkin: boolean
+  newly_unlocked_milestone: number | null
+  streak_reset: boolean
 }
 
 export interface UserUpdatePayload {
   full_name?: string | null
   avatar_url?: string | null
+  equipped_milestone?: number | null
 }
 
 export interface ChangePasswordPayload {
@@ -119,6 +132,24 @@ export async function changeUserPassword(
   if (!response.ok) {
     const err = await response.json().catch(() => null)
     throw new Error(err?.detail || `Failed to change password (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export async function performDailyCheckin(
+  localDate?: string
+): Promise<DailyCheckinResponse> {
+  const query = localDate ? `?local_date=${encodeURIComponent(localDate)}` : ""
+  const response = await fetch(`${API_BASE_URL}/auth/me/daily-checkin${query}`, {
+    method: "POST",
+    headers: getAuthHeaders({ Accept: "application/json" }),
+    cache: "no-store",
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(err?.detail || `Failed to perform daily check-in (${response.status})`)
   }
 
   return response.json()
