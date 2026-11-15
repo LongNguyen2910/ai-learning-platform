@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -13,6 +13,8 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.modules.documents.models import Document
 from app.modules.documents.storage import DocumentStorage, document_storage
+from app.modules.flashcards.domain.sm2_calculator import SM2Calculator
+from app.modules.flashcards.exceptions import FlashcardNotFoundError
 from app.modules.flashcards.models import Flashcard, FlashcardDeck
 from app.modules.flashcards.prompt import (
     FLASHCARD_DECK_GENERATION_SYSTEM_PROMPT,
@@ -52,8 +54,21 @@ def _resolve_option_text(options: list[Any], key: str) -> str:
 class FlashcardService:
     """Xử lý nghiệp vụ trích xuất và quản lý thẻ Flashcard."""
 
-    def __init__(self, client: genai.Client | None = None) -> None:
-        self._client = client
+    def __init__(
+        self,
+        db_or_client: Any = None,
+        client: genai.Client | None = None,
+        db: AsyncSession | None = None,
+    ) -> None:
+        if isinstance(db_or_client, genai.Client):
+            self._client = db_or_client
+            self.db = db
+        elif db_or_client is not None:
+            self.db = db_or_client
+            self._client = client
+        else:
+            self._client = client
+            self.db = db
 
     @property
     def client(self) -> genai.Client:
@@ -732,6 +747,44 @@ class FlashcardService:
         await db.commit()
         await db.refresh(card)
         return FlashcardResponse.model_validate(card)
+
+    async def review_flashcard(
+        self,
+        user_id: uuid.UUID,
+        flashcard_id: uuid.UUID,
+        rating: int,
+        review_date: date | None = None,
+        db: AsyncSession | None = None,
+    ) -> Flashcard:
+        session = db or self.db
+        if session is None:
+            raise ValueError("AsyncSession must be provided.")
+        stmt = select(Flashcard).where(
+            Flashcard.id == flashcard_id,
+            Flashcard.user_id == user_id,
+        )
+        result = await session.execute(stmt)
+        flashcard = result.scalar_one_or_none()
+
+        if not flashcard:
+            raise FlashcardNotFoundError(flashcard_id)
+
+        sm2_result = SM2Calculator.calculate(
+            current_repetition=flashcard.repetition_number,
+            current_ef=flashcard.easiness_factor,
+            current_interval=flashcard.interval_days,
+            rating=rating,
+            review_date=review_date,
+        )
+
+        flashcard.repetition_number = sm2_result.repetition_number
+        flashcard.easiness_factor = sm2_result.easiness_factor
+        flashcard.interval_days = sm2_result.interval_days
+        flashcard.due_date = sm2_result.due_date
+
+        await session.commit()
+        await session.refresh(flashcard)
+        return flashcard
 
 
 flashcard_service = FlashcardService()

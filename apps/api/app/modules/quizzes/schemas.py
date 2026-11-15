@@ -1,8 +1,9 @@
 from datetime import datetime
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class BloomLevel(str, Enum):
@@ -12,8 +13,20 @@ class BloomLevel(str, Enum):
 
 
 class QuizOptionItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
     key: str = Field(description="Mã đáp án: A, B, C hoặc D")
     text: str = Field(description="Nội dung chi tiết của lựa chọn")
+
+
+class QuestionCreateSchema(BaseModel):
+    question_text: str = Field(..., min_length=1)
+    bloom_level: str = Field(default="remember_understand", max_length=30)
+    options: list[dict[str, Any]] = Field(..., min_length=2)
+    correct_option: str = Field(..., max_length=5)
+    explanation: str | None = None
+    target_page: int | None = None
+    topic_tag: str | None = Field(default=None, max_length=100)
 
 
 class GeneratedQuestionItem(BaseModel):
@@ -47,6 +60,16 @@ class GeneratedQuizPayload(BaseModel):
     )
 
 
+class QuizCreateRequest(BaseModel):
+    document_id: UUID
+    subject_id: UUID | None = None
+    title: str = Field(..., min_length=1, max_length=255)
+    total_questions: int = Field(default=10, ge=1, le=50)
+    time_limit_minutes: int = Field(default=15, ge=1, le=180)
+    new_questions: list[QuestionCreateSchema] = Field(..., min_length=1)
+    seed: int | None = None
+
+
 class QuizGenerateRequest(BaseModel):
     document_id: UUID
     num_questions: int = Field(default=5, ge=5, le=10)
@@ -57,10 +80,12 @@ class QuizGenerateRequest(BaseModel):
 
 
 class QuizQuestionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
     question_text: str
     bloom_level: str
-    options: list[QuizOptionItem]
+    options: list[QuizOptionItem] | list[dict[str, Any]]
     correct_option: str
     explanation: str | None = None
     target_page: int | None = None
@@ -68,21 +93,31 @@ class QuizQuestionResponse(BaseModel):
     source_document_id: UUID | None = None
     source_document_title: str | None = None
 
-    model_config = {"from_attributes": True}
+
+QuestionResponse = QuizQuestionResponse
 
 
 class QuizResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: UUID
+    user_id: UUID | None = None
     document_id: UUID | None = None
     subject_id: UUID | None = None
     roadmap_id: UUID | None = None
     title: str
+    is_interleaved: bool = False
     total_questions: int
-    time_limit_minutes: int
+    time_limit_minutes: int = 15
     created_at: datetime
-    questions: list[QuizQuestionResponse]
+    questions: list[QuizQuestionResponse] = Field(default_factory=list)
 
-    model_config = {"from_attributes": True}
+    @field_validator("is_interleaved", mode="before")
+    @classmethod
+    def set_default_is_interleaved(cls, v: Any) -> bool:
+        if v is None:
+            return False
+        return bool(v)
 
 
 class QuizAttemptAnswerInput(BaseModel):
@@ -101,4 +136,3 @@ class QuizAttemptCreateResponse(BaseModel):
     total_correct: int
     total_incorrect: int
     completed_at: datetime
-

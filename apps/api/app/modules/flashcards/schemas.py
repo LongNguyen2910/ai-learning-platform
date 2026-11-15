@@ -1,9 +1,9 @@
 import uuid
 from datetime import date, datetime
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ExtractionSourceType(str, Enum):
@@ -99,6 +99,17 @@ class FlashcardResponse(BaseModel):
     created_at: datetime
 
 
+class FlashcardReviewResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    deck_id: uuid.UUID
+    repetition_number: int
+    easiness_factor: float
+    interval_days: int
+    due_date: date
+
+
 class FlashcardBulkCreateResponse(BaseModel):
     deck_id: uuid.UUID
     created_count: int
@@ -149,5 +160,22 @@ FlashcardReviewRating = Literal["again", "hard", "good", "easy"]
 
 
 class FlashcardReviewRequest(BaseModel):
-    rating: FlashcardReviewRating
+    rating: int | FlashcardReviewRating = Field(
+        ...,
+        description="Rating as integer (0-5) or one of 'again', 'hard', 'good', 'easy'",
+    )
+    review_date: date | None = Field(
+        default=None,
+        description="Optional review date, defaults to current UTC date if omitted",
+    )
 
+    @field_validator("rating", mode="before")
+    @classmethod
+    def validate_rating(cls, v: Any) -> Any:
+        if isinstance(v, int):
+            if v < 0 or v > 5:
+                raise ValueError("Rating score between 0 (blackout) and 5 (perfect recall)")
+            return v
+        if isinstance(v, str) and v in ("again", "hard", "good", "easy"):
+            return v
+        raise ValueError("Rating must be an integer (0-5) or 'again', 'hard', 'good', 'easy'")

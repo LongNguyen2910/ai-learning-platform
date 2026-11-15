@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 import logging
 import uuid
+from typing import Any
 
 from google import genai
 from google.genai import types
@@ -11,6 +12,9 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.modules.documents.models import Document
 from app.modules.documents.storage import DocumentStorage, document_storage
+from app.modules.quizzes.domain.interleaving_practice_mixer import (
+    InterleavingPracticeMixer,
+)
 from app.modules.quizzes.exceptions import (
     DocumentNotFoundError,
     DocumentNotReadyError,
@@ -27,6 +31,7 @@ from app.modules.quizzes.schemas import (
     GeneratedQuizPayload,
     QuizAttemptCreateRequest,
     QuizAttemptCreateResponse,
+    QuizCreateRequest,
     QuizGenerateRequest,
 )
 
@@ -34,15 +39,27 @@ logger = logging.getLogger(__name__)
 
 
 class QuizService:
-    """Orchestrates quiz generation using Gemini Structured Output and DB persistence."""
+    """Orchestrates quiz generation and interleaved quiz mixing with DB persistence."""
 
     def __init__(
         self,
+        db: Any = None,
         client: genai.Client | None = None,
         storage: DocumentStorage | None = None,
+        **kwargs: Any,
     ) -> None:
-        self._client = client
-        self.storage = storage or document_storage
+        if isinstance(db, genai.Client):
+            self.db = kwargs.get("db")
+            self._client = db
+            self.storage = (
+                client
+                if isinstance(client, DocumentStorage)
+                else (storage or kwargs.get("storage") or document_storage)
+            )
+        else:
+            self.db = db if db is not None else kwargs.get("db")
+            self._client = client
+            self.storage = storage or kwargs.get("storage") or document_storage
 
     @property
     def client(self) -> genai.Client:
@@ -240,6 +257,97 @@ class QuizService:
         saved_result = await db.execute(query_stmt)
         return saved_result.scalar_one()
 
+    async def create_interleaved_quiz(
+        self,
+        user_id: uuid.UUID,
+        payload: QuizCreateRequest,
+        db: AsyncSession | None = None,
+    ) -> Quiz:
+        session = db or self.db
+        if session is None:
+            raise ValueError("AsyncSession must be provided.")
+
+        # 1. Fetch historical review questions from other documents for this user
+        stmt = (
+            select(QuizQuestion)
+            .join(Quiz, QuizQuestion.quiz_id == Quiz.id)
+            .where(
+                Quiz.user_id == user_id,
+                Quiz.document_id != payload.document_id,
+            )
+        )
+        if payload.subject_id is not None:
+            stmt = stmt.where(Quiz.subject_id == payload.subject_id)
+
+        result = await session.execute(stmt)
+        review_db_questions = result.scalars().all()
+
+        # Format review questions for the mixer
+        review_pool: list[dict[str, Any]] = [
+            {
+                "question_text": q.question_text,
+                "bloom_level": q.bloom_level,
+                "options": q.options,
+                "correct_option": q.correct_option,
+                "explanation": q.explanation,
+                "target_page": q.target_page,
+                "topic_tag": q.topic_tag,
+            }
+            for q in review_db_questions
+        ]
+
+        # Format new questions for the mixer
+        new_pool: list[dict[str, Any]] = [
+            q.model_dump() for q in payload.new_questions
+        ]
+
+        # 2. Run Interleaving Practice Mixer domain algorithm (FR-20)
+        mixed_result = InterleavingPracticeMixer.mix(
+            new_questions=new_pool,
+            review_questions=review_pool,
+            total_questions=payload.total_questions,
+            seed=payload.seed,
+        )
+
+        # 3. Create Quiz entity
+        quiz = Quiz(
+            user_id=user_id,
+            document_id=payload.document_id,
+            subject_id=payload.subject_id,
+            title=payload.title,
+            is_interleaved=mixed_result.is_interleaved,
+            total_questions=mixed_result.total_count,
+            time_limit_minutes=payload.time_limit_minutes,
+        )
+        session.add(quiz)
+        await session.flush()
+
+        # 4. Create QuizQuestion entities from mixed questions
+        for item in mixed_result.questions:
+            q_data = item.question
+            question_entity = QuizQuestion(
+                quiz_id=quiz.id,
+                question_text=q_data["question_text"],
+                bloom_level=q_data["bloom_level"],
+                options=q_data["options"],
+                correct_option=q_data["correct_option"],
+                explanation=q_data.get("explanation"),
+                target_page=q_data.get("target_page"),
+                topic_tag=q_data.get("topic_tag"),
+            )
+            session.add(question_entity)
+
+        await session.commit()
+
+        # Refresh quiz with its questions loaded
+        stmt_reload = (
+            select(Quiz)
+            .options(selectinload(Quiz.questions))
+            .where(Quiz.id == quiz.id)
+        )
+        reloaded = await session.execute(stmt_reload)
+        return reloaded.scalar_one()
+
     async def list_user_quizzes(
         self,
         db: AsyncSession,
@@ -258,6 +366,20 @@ class QuizService:
         result = await db.execute(stmt)
         return list(result.scalars().all())
 
+    async def get_quiz(
+        self,
+        user_id: uuid.UUID,
+        quiz_id: uuid.UUID,
+        db: AsyncSession | None = None,
+    ) -> Quiz:
+        session = db or self.db
+        if session is None:
+            raise ValueError("AsyncSession must be provided.")
+        return await self.get_quiz_by_id(
+            db=session,
+            quiz_id=quiz_id,
+            user_id=user_id,
+        )
     async def get_quiz_by_id(
         self,
         db: AsyncSession,

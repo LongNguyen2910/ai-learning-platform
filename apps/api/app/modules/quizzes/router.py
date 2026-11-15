@@ -11,12 +11,15 @@ from app.modules.quizzes.exceptions import (
     DocumentNotFoundError,
     DocumentNotReadyError,
     GeminiGenerationError,
+    InsufficientQuestionsError,
+    InsufficientQuestionsError,
     InvalidPageRangeError,
     QuizNotFoundError,
 )
 from app.modules.quizzes.schemas import (
     QuizAttemptCreateRequest,
     QuizAttemptCreateResponse,
+    QuizCreateRequest,
     QuizGenerateRequest,
     QuizResponse,
 )
@@ -47,6 +50,30 @@ async def list_quizzes(
     return [QuizResponse.model_validate(q) for q in quizzes]
 
 
+@router.post(
+    "",
+    response_model=QuizResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an interleaved practice quiz (FR-20)",
+    description="Combines 70% current lesson questions with 30% historical review questions and shuffles them.",
+)
+async def create_quiz(
+    payload: QuizCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizResponse:
+    try:
+        quiz = await quiz_service.create_interleaved_quiz(
+            user_id=current_user.id,
+            payload=payload,
+            db=db,
+        )
+        return QuizResponse.model_validate(quiz)
+    except InsufficientQuestionsError as err:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(err),
+        ) from err
 @router.post(
     "/generate",
     response_model=QuizResponse,
@@ -93,7 +120,7 @@ async def generate_quiz(
     "/{quiz_id}",
     response_model=QuizResponse,
     status_code=status.HTTP_200_OK,
-    summary="Lấy chi tiết một bộ quiz kèm danh sách câu hỏi",
+    summary="Get quiz details by ID",
 )
 async def get_quiz(
     quiz_id: uuid.UUID,
@@ -164,3 +191,4 @@ async def delete_quiz(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+

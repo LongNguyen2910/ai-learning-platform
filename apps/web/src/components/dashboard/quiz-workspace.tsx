@@ -30,6 +30,7 @@ import type { SubjectItem } from "@/lib/api/roadmaps"
 import {
   fetchQuizzes,
   generateQuiz,
+  createInterleavedQuiz,
   deleteQuiz,
   recordQuizAttempt,
   type QuizItem,
@@ -140,6 +141,8 @@ export function QuizWorkspace({
   const [customTitle, setCustomTitle] = React.useState<string>("")
   const [initialLaunchMode, setInitialLaunchMode] =
     React.useState<QuizMode>("practice")
+  const [enableInterleaving, setEnableInterleaving] =
+    React.useState<boolean>(true)
   const [isGenerating, setIsGenerating] = React.useState(false)
   const [generateError, setGenerateError] = React.useState<string | null>(null)
 
@@ -409,14 +412,45 @@ export function QuizWorkspace({
         title: customTitle.trim() || null,
       })
 
+      let finalQuiz = created
+
+      if (enableInterleaving && created.questions && created.questions.length > 0) {
+        try {
+          const newQuestions = created.questions.map((q) => ({
+            question_text: q.question_text,
+            bloom_level: q.bloom_level,
+            options: q.options,
+            correct_option: q.correct_option,
+            explanation: q.explanation,
+            target_page: q.target_page,
+            topic_tag: q.topic_tag,
+          }))
+
+          const interleaved = await createInterleavedQuiz({
+            document_id: selectedDocForModal.document_id,
+            subject_id: selectedDocForModal.subject_id ?? null,
+            title: customTitle.trim() || created.title || `Quiz: ${selectedDocForModal.title}`,
+            total_questions: created.questions.length,
+            time_limit_minutes: created.time_limit_minutes || 15,
+            new_questions: newQuestions,
+          })
+
+          // Delete intermediate raw quiz to avoid duplication
+          await deleteQuiz(created.id).catch(() => {})
+          finalQuiz = interleaved
+        } catch (mixErr) {
+          console.warn("Could not create interleaved quiz, using generated quiz:", mixErr)
+        }
+      }
+
       setQuizzes((prev) => [
-        created,
-        ...prev.filter((q) => q.id !== created.id),
+        finalQuiz,
+        ...prev.filter((q) => q.id !== finalQuiz.id),
       ])
       setIsCreateModalOpen(false)
       setTopicTag("")
       setCustomTitle("")
-      handleStartQuiz(created, initialLaunchMode)
+      handleStartQuiz(finalQuiz, initialLaunchMode)
     } catch (err) {
       setGenerateError(
         err instanceof Error
@@ -758,7 +792,6 @@ export function QuizWorkspace({
                     <span>{extractError}</span>
                   </div>
                 )}
-
                 {/* 3-Level Bloom Taxonomy Breakdown */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {(
@@ -1053,7 +1086,6 @@ export function QuizWorkspace({
             )}
           </div>
         </div>
-
         <FlashcardPreviewModal
           open={isFlashcardPreviewOpen}
           onClose={() => setIsFlashcardPreviewOpen(false)}
@@ -1305,6 +1337,12 @@ export function QuizWorkspace({
                             <Clock className="h-3 w-3 stroke-[1.8]" />
                             {quiz.time_limit_minutes}m
                           </span>
+                          {quiz.is_interleaved && (
+                            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 dark:bg-purple-500/20 px-2 py-0.5 text-[11px] font-semibold text-purple-600 dark:text-purple-300">
+                              <RefreshCw className="h-3 w-3 stroke-[2]" />
+                              Interleaved
+                            </span>
+                          )}
                         </div>
 
                         <h3 className="text-base font-bold text-slate-900 dark:text-white leading-snug line-clamp-2">
@@ -1685,6 +1723,25 @@ export function QuizWorkspace({
                     </div>
                   </div>
 
+                  {/* 6. Interleaving Practice (FR-20) Checkbox */}
+                  <div className="rounded-xl border border-blue-200/70 dark:border-blue-900/40 bg-blue-50/50 dark:bg-blue-950/20 p-3.5 space-y-1.5 transition-colors">
+                    <label className="flex items-start gap-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={enableInterleaving}
+                        onChange={(e) => setEnableInterleaving(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-slate-300 text-[#0A77FF] focus:ring-[#0A77FF] cursor-pointer"
+                      />
+                      <div className="space-y-0.5 select-none">
+                        <span className="block text-xs font-semibold text-slate-800 dark:text-slate-200">
+                          Bật chế độ Luyện tập xen kẽ (Interleaving Practice)
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                          Tự động trộn 30% câu hỏi ôn tập từ các bài học trước vào 70% câu hỏi mới của tài liệu hiện tại (FR-20).
+                        </p>
+                      </div>
+                    </label>
+                  </div>
                   {generateError && (
                     <div className="rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 p-3 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
                       <AlertCircle className="h-4 w-4 shrink-0" />

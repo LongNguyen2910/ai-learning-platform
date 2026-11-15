@@ -1,12 +1,13 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
+from app.modules.flashcards.exceptions import FlashcardNotFoundError
 from app.modules.flashcards.schemas import (
     FlashcardBulkCreateRequest,
     FlashcardBulkCreateResponse,
@@ -19,9 +20,10 @@ from app.modules.flashcards.schemas import (
     FlashcardItemCreate,
     FlashcardResponse,
     FlashcardReviewRequest,
+    FlashcardReviewResponse,
     FlashcardUpdateRequest,
 )
-from app.modules.flashcards.service import flashcard_service
+from app.modules.flashcards.service import FlashcardService, flashcard_service
 
 logger = logging.getLogger(__name__)
 
@@ -235,3 +237,37 @@ async def bulk_create_flashcards(
         user_id=current_user.id,
         request=request,
     )
+
+
+@router.post(
+    "/{flashcard_id}/review",
+    response_model=FlashcardReviewResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Review a flashcard with SM-2 spaced repetition",
+    description="Updates repetition count, easiness factor, interval, and next due date based on user rating (0-5 stars).",
+)
+async def review_flashcard_numeric(
+    flashcard_id: uuid.UUID,
+    payload: FlashcardReviewRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> FlashcardReviewResponse:
+    service = FlashcardService(db)
+    try:
+        rating_val = (
+            payload.rating
+            if isinstance(payload.rating, int)
+            else ({"again": 1, "hard": 3, "good": 4, "easy": 5}.get(payload.rating, 3))
+        )
+        updated = await service.review_flashcard(
+            user_id=current_user.id,
+            flashcard_id=flashcard_id,
+            rating=rating_val,
+            review_date=payload.review_date,
+        )
+        return FlashcardReviewResponse.model_validate(updated)
+    except FlashcardNotFoundError as err:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
+        ) from err

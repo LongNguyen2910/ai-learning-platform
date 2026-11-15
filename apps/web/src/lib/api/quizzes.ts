@@ -31,6 +31,7 @@ export interface QuizItem {
   title: string
   total_questions: number
   time_limit_minutes: number
+  is_interleaved?: boolean
   created_at: string
   questions: QuizQuestionItem[]
 }
@@ -99,6 +100,45 @@ export async function generateQuiz(payload: QuizGeneratePayload): Promise<QuizIt
   return response.json()
 }
 
+export interface CreateQuizPayload {
+  document_id: string
+  subject_id?: string | null
+  title: string
+  total_questions: number
+  time_limit_minutes?: number
+  new_questions: {
+    question_text: string
+    bloom_level: string
+    options: QuizOptionItem[] | { key: string; text: string }[]
+    correct_option: string
+    explanation?: string | null
+    target_page?: number | null
+    topic_tag?: string | null
+  }[]
+  seed?: number | null
+}
+
+export async function createInterleavedQuiz(
+  payload: CreateQuizPayload
+): Promise<QuizItem> {
+  const response = await fetch(`${API_BASE_URL}/quizzes`, {
+    method: "POST",
+    headers: getAuthHeaders({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    }),
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Failed to create interleaved quiz (${response.status})`
+    )
+  }
+
+  return response.json()
+}
 export async function deleteQuiz(quizId: string): Promise<void> {
   const response = await fetch(`${API_BASE_URL}/quizzes/${quizId}`, {
     method: "DELETE",
@@ -147,4 +187,5 @@ export async function recordQuizAttempt(
 
   return response.json()
 }
+
 

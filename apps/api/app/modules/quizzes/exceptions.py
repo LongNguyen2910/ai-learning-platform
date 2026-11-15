@@ -9,6 +9,13 @@ class QuizDomainException(Exception):
         self.message = message
 
 
+QuizDomainError = QuizDomainException
+
+
+class InsufficientQuestionsError(QuizDomainException):
+    """Raised when question pool has fewer questions than requested."""
+
+
 class DocumentNotFoundError(QuizDomainException):
     """Raised when the specified document does not exist or user lacks access."""
 
@@ -49,5 +56,5 @@ class QuizNotFoundError(QuizDomainException):
     """Raised when the specified quiz does not exist or user lacks access."""
 
     def __init__(self, quiz_id: uuid.UUID | str) -> None:
-        super().__init__(f"Quiz with id '{quiz_id}' was not found.")
+        super().__init__(f"Quiz with id {quiz_id} not found.")
         self.quiz_id = quiz_id
