@@ -100,7 +100,7 @@ class QuizQuestion(Base):
         JSONB,
         nullable=False,
     )
-    correct_option: Mapped[str] = mapped_column(String(5), nullable=False)
+    correct_option: Mapped[str] = mapped_column(String(20), nullable=False)
     explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     topic_tag: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -184,7 +184,7 @@ class QuizAttemptAnswer(Base):
         ForeignKey("quiz_questions.id", ondelete="CASCADE"),
         nullable=False,
     )
-    selected_option: Mapped[str] = mapped_column(String(5), nullable=False)
+    selected_option: Mapped[str] = mapped_column(String(20), nullable=False)
     is_correct: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     # Relationships

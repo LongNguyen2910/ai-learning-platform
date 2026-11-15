@@ -12,11 +12,12 @@ from app.modules.quizzes.exceptions import (
     DocumentNotReadyError,
     GeminiGenerationError,
     InsufficientQuestionsError,
-    InsufficientQuestionsError,
     InvalidPageRangeError,
+    QuizAttemptNotFoundError,
     QuizNotFoundError,
 )
 from app.modules.quizzes.schemas import (
+    QuizAttemptAnalysisResponse,
     QuizAttemptCreateRequest,
     QuizAttemptCreateResponse,
     QuizCreateRequest,
@@ -146,7 +147,7 @@ async def get_quiz(
     "/{quiz_id}/attempts",
     response_model=QuizAttemptCreateResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Ghi nhận lượt làm bài quiz để phục vụ trích xuất Flashcard",
+    summary="Ghi nhận lượt làm bài quiz và trả về phân tích lỗ hổng kiến thức (FR-21)",
 )
 async def create_quiz_attempt(
     quiz_id: uuid.UUID,
@@ -166,6 +167,32 @@ async def create_quiz_attempt(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
         ) from exc
+
+
+@router.get(
+    "/attempts/{attempt_id}/analysis",
+    response_model=QuizAttemptAnalysisResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Lấy chi tiết phân tích kết quả thi, lỗ hổng kiến thức và trang sách ôn tập (FR-21)",
+)
+async def get_quiz_attempt_analysis(
+    attempt_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizAttemptAnalysisResponse:
+    """Tra cứu ma trận Bloom, danh sách topic hổng và trang sách cần đọc lại theo attempt_id."""
+    try:
+        return await quiz_service.get_quiz_attempt_analysis(
+            db=db,
+            attempt_id=attempt_id,
+            user_id=current_user.id,
+        )
+    except QuizAttemptNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
 
 
 @router.delete(

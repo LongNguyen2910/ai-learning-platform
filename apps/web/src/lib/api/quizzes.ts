@@ -151,6 +151,44 @@ export async function deleteQuiz(quizId: string): Promise<void> {
   }
 }
 
+export interface BloomBreakdownMatrix {
+  remember_correct: number
+  remember_total: number
+  understand_correct: number
+  understand_total: number
+  apply_correct: number
+  apply_total: number
+}
+
+export interface TopicGapItem {
+  topic_tag: string
+  is_gap: boolean
+  severity: "critical_foundation" | "application_practice" | null
+  total_questions: number
+  correct_questions: number
+  incorrect_questions: number
+  bloom_matrix: BloomBreakdownMatrix
+  incorrect_question_ids: string[]
+}
+
+export interface DocumentReviewTarget {
+  document_id: string | null
+  document_title: string
+  pages: number[]
+  topics: string[]
+}
+
+export interface QuizAnalysisResult {
+  score: number
+  total_questions: number
+  total_correct: number
+  total_incorrect: number
+  weak_topics: TopicGapItem[]
+  mastered_topics: TopicGapItem[]
+  review_recommendations: DocumentReviewTarget[]
+  bloom_summary: BloomBreakdownMatrix
+}
+
 export interface QuizAttemptAnswerInput {
   question_id: string
   selected_option: string
@@ -163,6 +201,17 @@ export interface QuizAttemptRecordResponse {
   total_correct: number
   total_incorrect: number
   completed_at: string
+  analysis?: QuizAnalysisResult | null
+}
+
+export interface QuizAttemptAnalysisResponse {
+  attempt_id: string
+  quiz_id: string
+  score: number
+  total_correct: number
+  total_incorrect: number
+  completed_at: string
+  analysis: QuizAnalysisResult
 }
 
 export async function recordQuizAttempt(
@@ -187,5 +236,28 @@ export async function recordQuizAttempt(
 
   return response.json()
 }
+
+export async function fetchQuizAttemptAnalysis(
+  attemptId: string
+): Promise<QuizAttemptAnalysisResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/quizzes/attempts/${attemptId}/analysis`,
+    {
+      method: "GET",
+      headers: getAuthHeaders({ Accept: "application/json" }),
+      cache: "no-store",
+    }
+  )
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => null)
+    throw new Error(
+      err?.detail || `Failed to fetch attempt analysis (${response.status})`
+    )
+  }
+
+  return response.json()
+}
+
 
 

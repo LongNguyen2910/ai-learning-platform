@@ -122,11 +122,51 @@ class QuizResponse(BaseModel):
 
 class QuizAttemptAnswerInput(BaseModel):
     question_id: UUID
-    selected_option: str = Field(..., min_length=1, max_length=10)
+    selected_option: str = Field(..., min_length=1, max_length=20)
 
 
 class QuizAttemptCreateRequest(BaseModel):
     answers: list[QuizAttemptAnswerInput] = Field(default_factory=list)
+
+
+class BloomBreakdownSchema(BaseModel):
+    remember_correct: int = 0
+    remember_total: int = 0
+    understand_correct: int = 0
+    understand_total: int = 0
+    apply_correct: int = 0
+    apply_total: int = 0
+
+
+class TopicGapItemSchema(BaseModel):
+    topic_tag: str
+    is_gap: bool
+    severity: str | None = None
+    total_questions: int
+    correct_questions: int
+    incorrect_questions: int
+    bloom_matrix: BloomBreakdownSchema
+    incorrect_question_ids: list[str] = Field(default_factory=list)
+
+
+class DocumentReviewTargetSchema(BaseModel):
+    document_id: str | None = None
+    document_title: str
+    pages: list[int] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)
+
+
+class QuizAnalysisSchema(BaseModel):
+    score: float
+    total_questions: int
+    total_correct: int
+    total_incorrect: int
+    weak_topics: list[TopicGapItemSchema] = Field(default_factory=list)
+    mastered_topics: list[TopicGapItemSchema] = Field(default_factory=list)
+    review_recommendations: list[DocumentReviewTargetSchema] = Field(
+        default_factory=list
+    )
+    bloom_summary: BloomBreakdownSchema
 
 
 class QuizAttemptCreateResponse(BaseModel):
@@ -136,3 +176,15 @@ class QuizAttemptCreateResponse(BaseModel):
     total_correct: int
     total_incorrect: int
     completed_at: datetime
+    analysis: QuizAnalysisSchema | None = None
+
+
+class QuizAttemptAnalysisResponse(BaseModel):
+    attempt_id: UUID
+    quiz_id: UUID
+    score: float
+    total_correct: int
+    total_incorrect: int
+    completed_at: datetime
+    analysis: QuizAnalysisSchema
+

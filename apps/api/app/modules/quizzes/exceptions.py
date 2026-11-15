@@ -58,3 +58,12 @@ class QuizNotFoundError(QuizDomainException):
     def __init__(self, quiz_id: uuid.UUID | str) -> None:
         super().__init__(f"Quiz with id {quiz_id} not found.")
         self.quiz_id = quiz_id
+
+
+class QuizAttemptNotFoundError(QuizDomainException):
+    """Raised when the specified quiz attempt does not exist or user lacks access."""
+
+    def __init__(self, attempt_id: uuid.UUID | str) -> None:
+        super().__init__(f"Quiz attempt with id {attempt_id} not found.")
+        self.attempt_id = attempt_id
+

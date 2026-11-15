@@ -12,14 +12,19 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.modules.documents.models import Document
 from app.modules.documents.storage import DocumentStorage, document_storage
+from app.modules.quizzes.domain.entities import QuizAnalysisResult
 from app.modules.quizzes.domain.interleaving_practice_mixer import (
     InterleavingPracticeMixer,
+)
+from app.modules.quizzes.domain.knowledge_gap_analyzer import (
+    KnowledgeGapAnalyzer,
 )
 from app.modules.quizzes.exceptions import (
     DocumentNotFoundError,
     DocumentNotReadyError,
     GeminiGenerationError,
     InvalidPageRangeError,
+    QuizAttemptNotFoundError,
     QuizNotFoundError,
 )
 from app.modules.quizzes.models import Quiz, QuizAttempt, QuizAttemptAnswer, QuizQuestion
@@ -28,11 +33,16 @@ from app.modules.quizzes.prompt import (
     build_quiz_generation_prompt,
 )
 from app.modules.quizzes.schemas import (
+    BloomBreakdownSchema,
+    DocumentReviewTargetSchema,
     GeneratedQuizPayload,
+    QuizAnalysisSchema,
+    QuizAttemptAnalysisResponse,
     QuizAttemptCreateRequest,
     QuizAttemptCreateResponse,
     QuizCreateRequest,
     QuizGenerateRequest,
+    TopicGapItemSchema,
 )
 
 logger = logging.getLogger(__name__)
@@ -386,10 +396,13 @@ class QuizService:
         quiz_id: uuid.UUID,
         user_id: uuid.UUID,
     ) -> Quiz:
-        """Retrieves a quiz and its questions for the authorized user."""
+        """Retrieves a quiz, its questions, and document for the authorized user."""
         stmt = (
             select(Quiz)
-            .options(selectinload(Quiz.questions))
+            .options(
+                selectinload(Quiz.questions),
+                selectinload(Quiz.document),
+            )
             .where(Quiz.id == quiz_id, Quiz.user_id == user_id)
         )
         result = await db.execute(stmt)
@@ -413,6 +426,72 @@ class QuizService:
         await db.delete(quiz)
         await db.commit()
 
+    @staticmethod
+    def _map_analysis_result(analysis: QuizAnalysisResult) -> QuizAnalysisSchema:
+        return QuizAnalysisSchema(
+            score=analysis.score,
+            total_questions=analysis.total_questions,
+            total_correct=analysis.total_correct,
+            total_incorrect=analysis.total_incorrect,
+            weak_topics=[
+                TopicGapItemSchema(
+                    topic_tag=t.topic_tag,
+                    is_gap=t.is_gap,
+                    severity=t.severity.value if t.severity else None,
+                    total_questions=t.total_questions,
+                    correct_questions=t.correct_questions,
+                    incorrect_questions=t.incorrect_questions,
+                    bloom_matrix=BloomBreakdownSchema(
+                        remember_correct=t.bloom_matrix.remember_correct,
+                        remember_total=t.bloom_matrix.remember_total,
+                        understand_correct=t.bloom_matrix.understand_correct,
+                        understand_total=t.bloom_matrix.understand_total,
+                        apply_correct=t.bloom_matrix.apply_correct,
+                        apply_total=t.bloom_matrix.apply_total,
+                    ),
+                    incorrect_question_ids=t.incorrect_question_ids,
+                )
+                for t in analysis.weak_topics
+            ],
+            mastered_topics=[
+                TopicGapItemSchema(
+                    topic_tag=t.topic_tag,
+                    is_gap=t.is_gap,
+                    severity=None,
+                    total_questions=t.total_questions,
+                    correct_questions=t.correct_questions,
+                    incorrect_questions=0,
+                    bloom_matrix=BloomBreakdownSchema(
+                        remember_correct=t.bloom_matrix.remember_correct,
+                        remember_total=t.bloom_matrix.remember_total,
+                        understand_correct=t.bloom_matrix.understand_correct,
+                        understand_total=t.bloom_matrix.understand_total,
+                        apply_correct=t.bloom_matrix.apply_correct,
+                        apply_total=t.bloom_matrix.apply_total,
+                    ),
+                    incorrect_question_ids=[],
+                )
+                for t in analysis.mastered_topics
+            ],
+            review_recommendations=[
+                DocumentReviewTargetSchema(
+                    document_id=r.document_id,
+                    document_title=r.document_title,
+                    pages=r.pages,
+                    topics=r.topics,
+                )
+                for r in analysis.review_recommendations
+            ],
+            bloom_summary=BloomBreakdownSchema(
+                remember_correct=analysis.bloom_summary.remember_correct,
+                remember_total=analysis.bloom_summary.remember_total,
+                understand_correct=analysis.bloom_summary.understand_correct,
+                understand_total=analysis.bloom_summary.understand_total,
+                apply_correct=analysis.bloom_summary.apply_correct,
+                apply_total=analysis.bloom_summary.apply_total,
+            ),
+        )
+
     async def record_quiz_attempt(
         self,
         db: AsyncSession,
@@ -420,7 +499,7 @@ class QuizService:
         user_id: uuid.UUID,
         request: QuizAttemptCreateRequest,
     ) -> QuizAttemptCreateResponse:
-        """Persists a completed QuizAttempt and its QuizAttemptAnswers for flashcard extraction."""
+        """Persists a completed QuizAttempt and calculates knowledge gaps and review pages (FR-21)."""
         quiz = await self.get_quiz_by_id(db=db, quiz_id=quiz_id, user_id=user_id)
         answers_map = {
             a.question_id: a.selected_option.strip().upper()
@@ -443,6 +522,7 @@ class QuizService:
         db.add(attempt)
         await db.flush()
 
+        questions_for_analysis: list[dict[str, Any]] = []
         for q in quiz.questions:
             selected = answers_map.get(q.id, "-")
             is_correct = selected == q.correct_option.strip().upper()
@@ -452,10 +532,25 @@ class QuizService:
                 id=uuid.uuid4(),
                 attempt_id=attempt.id,
                 question_id=q.id,
-                selected_option=selected[:10] if selected else "-",
+                selected_option=selected[:20] if selected else "-",
                 is_correct=is_correct,
             )
             db.add(ans_row)
+
+            questions_for_analysis.append(
+                {
+                    "question_id": str(q.id),
+                    "is_correct": is_correct,
+                    "bloom_level": q.bloom_level,
+                    "topic_tag": q.topic_tag,
+                    "target_page": q.target_page,
+                    "source_document_id": str(q.source_document_id)
+                    if q.source_document_id
+                    else (str(quiz.document_id) if quiz.document_id else None),
+                    "source_document_title": q.source_document_title
+                    or (quiz.document.title if quiz.document else "Tài liệu học tập"),
+                }
+            )
 
         total_incorrect = max(0, total_q - total_correct)
         score = round((total_correct / total_q) * 100.0, 2) if total_q > 0 else 0.0
@@ -464,6 +559,14 @@ class QuizService:
         attempt.total_incorrect = total_incorrect
 
         await db.commit()
+
+        analysis_domain = KnowledgeGapAnalyzer.analyze(
+            questions_with_results=questions_for_analysis,
+            default_document_id=str(quiz.document_id) if quiz.document_id else None,
+            default_document_title=quiz.document.title if quiz.document else "Tài liệu học tập",
+        )
+        analysis_schema = self._map_analysis_result(analysis_domain)
+
         return QuizAttemptCreateResponse(
             attempt_id=attempt.id,
             quiz_id=quiz.id,
@@ -471,7 +574,68 @@ class QuizService:
             total_correct=total_correct,
             total_incorrect=total_incorrect,
             completed_at=now_utc,
+            analysis=analysis_schema,
         )
+
+    async def get_quiz_attempt_analysis(
+        self,
+        db: AsyncSession,
+        attempt_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> QuizAttemptAnalysisResponse:
+        """Retrieves and recomputes the analysis of a specific attempt for the authorized user (FR-21)."""
+        stmt = (
+            select(QuizAttempt)
+            .options(
+                selectinload(QuizAttempt.answers).selectinload(QuizAttemptAnswer.question),
+                selectinload(QuizAttempt.quiz).selectinload(Quiz.document),
+            )
+            .where(QuizAttempt.id == attempt_id, QuizAttempt.user_id == user_id)
+        )
+        result = await db.execute(stmt)
+        attempt = result.scalar_one_or_none()
+        if not attempt:
+            raise QuizAttemptNotFoundError(attempt_id)
+
+        quiz = attempt.quiz
+        questions_for_analysis: list[dict[str, Any]] = []
+
+        for ans in attempt.answers:
+            q = ans.question
+            if not q:
+                continue
+            questions_for_analysis.append(
+                {
+                    "question_id": str(q.id),
+                    "is_correct": ans.is_correct,
+                    "bloom_level": q.bloom_level,
+                    "topic_tag": q.topic_tag,
+                    "target_page": q.target_page,
+                    "source_document_id": str(q.source_document_id)
+                    if q.source_document_id
+                    else (str(quiz.document_id) if quiz and quiz.document_id else None),
+                    "source_document_title": q.source_document_title
+                    or (quiz.document.title if quiz and quiz.document else "Tài liệu học tập"),
+                }
+            )
+
+        analysis_domain = KnowledgeGapAnalyzer.analyze(
+            questions_with_results=questions_for_analysis,
+            default_document_id=str(quiz.document_id) if quiz and quiz.document_id else None,
+            default_document_title=quiz.document.title if quiz and quiz.document else "Tài liệu học tập",
+        )
+        analysis_schema = self._map_analysis_result(analysis_domain)
+
+        return QuizAttemptAnalysisResponse(
+            attempt_id=attempt.id,
+            quiz_id=attempt.quiz_id,
+            score=attempt.score,
+            total_correct=attempt.total_correct,
+            total_incorrect=attempt.total_incorrect,
+            completed_at=attempt.completed_at,
+            analysis=analysis_schema,
+        )
+
 
 
 quiz_service = QuizService()
