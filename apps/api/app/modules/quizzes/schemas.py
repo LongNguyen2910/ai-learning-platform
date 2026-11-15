@@ -13,7 +13,7 @@ class BloomLevel(str, Enum):
 
 
 class QuizOptionItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True, extra="allow")
+    model_config = ConfigDict(from_attributes=True)
 
     key: str = Field(description="Mã đáp án: A, B, C hoặc D")
     text: str = Field(description="Nội dung chi tiết của lựa chọn")
