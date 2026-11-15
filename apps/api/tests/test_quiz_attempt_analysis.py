@@ -9,7 +9,12 @@ from app.core.database import get_db
 from app.main import app
 from app.modules.auth.dependencies import get_current_user
 from app.modules.auth.models import User
-from app.modules.quizzes.models import Quiz, QuizAttempt, QuizAttemptAnswer, QuizQuestion
+from app.modules.quizzes.models import (
+    Quiz,
+    QuizAttempt,
+    QuizAttemptAnswer,
+    QuizQuestion,
+)
 
 
 @pytest.fixture
@@ -196,3 +201,130 @@ def test_get_attempt_analysis_not_found(auth_client: TestClient, mock_db: AsyncM
     resp = auth_client.get(f"/api/v1/quizzes/attempts/{attempt_id}/analysis")
     assert resp.status_code == 404
     assert f"Quiz attempt with id {attempt_id} not found" in resp.json()["detail"]
+
+
+def test_quiz_scoring_perfect_100_percent(
+    auth_client: TestClient, current_user: User, mock_db: AsyncMock
+):
+    """Quiz Scoring: All questions answered correctly yield 100.0% score."""
+    quiz_id = uuid.uuid4()
+    q1_id = uuid.uuid4()
+    q2_id = uuid.uuid4()
+
+    q1 = QuizQuestion(
+        id=q1_id,
+        quiz_id=quiz_id,
+        question_text="Q1",
+        bloom_level="remember",
+        options=[{"key": "A", "text": "A"}],
+        correct_option="A",
+        topic_tag="Topic 1",
+        target_page=1,
+    )
+    q2 = QuizQuestion(
+        id=q2_id,
+        quiz_id=quiz_id,
+        question_text="Q2",
+        bloom_level="understand",
+        options=[{"key": "B", "text": "B"}],
+        correct_option="B",
+        topic_tag="Topic 2",
+        target_page=2,
+    )
+
+    quiz = Quiz(
+        id=quiz_id,
+        user_id=current_user.id,
+        title="Perfect Quiz",
+        total_questions=2,
+        time_limit_minutes=10,
+        created_at=datetime.now(UTC),
+    )
+    quiz.questions = [q1, q2]
+
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = quiz
+    mock_db.execute.return_value = mock_res
+
+    payload = {
+        "answers": [
+            {"question_id": str(q1_id), "selected_option": "A"},
+            {"question_id": str(q2_id), "selected_option": "B"},
+        ]
+    }
+    resp = auth_client.post(f"/api/v1/quizzes/{quiz_id}/attempts", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["score"] == 100.0
+    assert data["total_correct"] == 2
+    assert data["total_incorrect"] == 0
+
+
+def test_quiz_scoring_rounding_percentages_and_unanswered(
+    auth_client: TestClient, current_user: User, mock_db: AsyncMock
+):
+    """Quiz Scoring: 1 out of 3 correct yields 33.33% with unanswered questions handled."""
+    quiz_id = uuid.uuid4()
+    q1_id = uuid.uuid4()
+    q2_id = uuid.uuid4()
+    q3_id = uuid.uuid4()
+
+    q1 = QuizQuestion(
+        id=q1_id,
+        quiz_id=quiz_id,
+        question_text="Q1",
+        bloom_level="remember",
+        options=[{"key": "A", "text": "A"}],
+        correct_option="A",
+        topic_tag="Topic 1",
+        target_page=1,
+    )
+    q2 = QuizQuestion(
+        id=q2_id,
+        quiz_id=quiz_id,
+        question_text="Q2",
+        bloom_level="remember",
+        options=[{"key": "B", "text": "B"}],
+        correct_option="B",
+        topic_tag="Topic 2",
+        target_page=2,
+    )
+    q3 = QuizQuestion(
+        id=q3_id,
+        quiz_id=quiz_id,
+        question_text="Q3",
+        bloom_level="remember",
+        options=[{"key": "C", "text": "C"}],
+        correct_option="C",
+        topic_tag="Topic 3",
+        target_page=3,
+    )
+
+    quiz = Quiz(
+        id=quiz_id,
+        user_id=current_user.id,
+        title="Rounding Quiz",
+        total_questions=3,
+        time_limit_minutes=15,
+        created_at=datetime.now(UTC),
+    )
+    quiz.questions = [q1, q2, q3]
+
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = quiz
+    mock_db.execute.return_value = mock_res
+
+    # Answer only Q1 correctly, Q2 wrong, Q3 left unanswered
+    payload = {
+        "answers": [
+            {"question_id": str(q1_id), "selected_option": "A"},
+            {"question_id": str(q2_id), "selected_option": "D"},
+            # Q3 omitted
+        ]
+    }
+    resp = auth_client.post(f"/api/v1/quizzes/{quiz_id}/attempts", json=payload)
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["score"] == 33.33
+    assert data["total_correct"] == 1
+    assert data["total_incorrect"] == 2
