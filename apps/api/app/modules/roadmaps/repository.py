@@ -216,3 +216,18 @@ class RoadmapRepository:
         ):
             roadmap.exam_status = "ready"
         await self.session.flush()
+
+    async def update_target_date_and_status(
+        self,
+        roadmap_id: uuid.UUID,
+        target_date: date,
+        status: str = "active",
+        roadmap: Roadmap | None = None,
+    ) -> None:
+        """Updates target_date and status after auto-adjustment for behind-schedule roadmaps."""
+        target = roadmap if roadmap is not None else await self.get_roadmap_by_id(roadmap_id)
+        if target is None:
+            return
+        target.target_date = target_date
+        target.status = status
+        await self.session.flush()

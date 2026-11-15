@@ -248,7 +248,9 @@ def test_get_task_status_endpoint_not_found(client: TestClient):
     assert "was not found" in response.json()["detail"]
 
 
-def test_get_roadmap_tree_endpoint_success(client: TestClient, mock_user: User):
+def test_get_roadmap_tree_endpoint_success(
+    client: TestClient, mock_user: User, mock_db: AsyncMock
+):
     roadmap_id = uuid.uuid4()
     chapter_id = uuid.uuid4()
     topic_id = uuid.uuid4()
@@ -326,6 +328,211 @@ def test_get_roadmap_tree_endpoint_success(client: TestClient, mock_user: User):
         assert tree[0]["children"][0]["id"] == str(topic_id)
         assert len(tree[0]["children"][0]["children"]) == 1
         assert tree[0]["children"][0]["children"][0]["id"] == str(block_id)
+        assert data["was_adjusted"] is False
+        assert data["days_extended"] == 0
+        mock_db.commit.assert_not_called()
+
+
+def test_get_roadmap_tree_endpoint_fr15_behind_schedule_auto_adjusts(
+    client: TestClient, mock_user: User, mock_db: AsyncMock
+):
+    """FR-15: Endpoint auto-adjusts roadmap target_date when student is behind schedule."""
+    roadmap_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    block1_id = uuid.uuid4()
+    block2_id = uuid.uuid4()
+
+    chapter = RoadmapNode(
+        id=chapter_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=None,
+        title="Chương 1",
+        description="",
+        order_index=1,
+        estimated_minutes=240,
+        is_unlocked=True,
+        is_completed=False,
+    )
+    # 2 uncompleted leaf blocks, 120 mins each = 240 mins remaining
+    block1 = RoadmapNode(
+        id=block1_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=chapter_id,
+        title="Khối 1",
+        order_index=2,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=False,
+    )
+    block2 = RoadmapNode(
+        id=block2_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=chapter_id,
+        title="Khối 2",
+        order_index=3,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    # 1 day left: 1 day * (2h * 60m) = 120 available minutes. Remaining: 240 mins > 120 mins -> Behind schedule!
+    # Expected extension: ceil(240 / 120) = 2 days from today. Old target was +1 day -> extended by 1 day.
+    today = date.today()
+    initial_target_date = today + timedelta(days=1)
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Lộ trình học chậm tiến độ",
+        target_date=initial_target_date,
+        available_hours_per_day=2.0,
+        progress_percentage=0.0,
+        status="behind_schedule",
+        created_at=datetime.now(UTC),
+        nodes=[chapter, block1, block2],
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.update_target_date_and_status = AsyncMock()
+
+        response = client.get(f"/api/v1/roadmaps/{roadmap_id}/tree")
+        assert response.status_code == 200
+        data = response.json()
+
+        # Verify FR-15 auto-adjustment results
+        assert data["was_adjusted"] is True
+        assert data["was_rescheduled"] is True
+        assert data["days_extended"] == 1
+        assert data["original_target_date"] == initial_target_date.isoformat()
+        expected_new_date = today + timedelta(days=2)
+        assert data["roadmap"]["target_date"] == expected_new_date.isoformat()
+        assert data["roadmap"]["status"] == "active"
+        assert "gia hạn thêm 1 ngày" in data["adjustment_message"]
+
+        # Verify database commit was triggered on adjustment
+        mock_db.commit.assert_awaited_once()
+
+
+def test_get_roadmap_tree_endpoint_fr15_overdue_past_target_date_auto_adjusts(
+    client: TestClient, mock_user: User, mock_db: AsyncMock
+):
+    """FR-15: When target_date is in the past, endpoint auto-extends from today."""
+    roadmap_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    block_id = uuid.uuid4()
+
+    chapter = RoadmapNode(
+        id=chapter_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=None,
+        title="Chương 1",
+        order_index=1,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=False,
+    )
+    block = RoadmapNode(
+        id=block_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=chapter_id,
+        title="Khối 1",
+        order_index=2,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=False,
+    )
+
+    today = date.today()
+    past_target = today - timedelta(days=3)
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Lộ trình đã quá hạn",
+        target_date=past_target,
+        available_hours_per_day=2.0,
+        progress_percentage=20.0,
+        status="behind_schedule",
+        created_at=datetime.now(UTC),
+        nodes=[chapter, block],
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+        mock_repo.update_target_date_and_status = AsyncMock()
+
+        response = client.get(f"/api/v1/roadmaps/{roadmap_id}/tree")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["was_adjusted"] is True
+        assert data["days_extended"] == 4  # From -3 days to +1 day
+        assert data["original_target_date"] == past_target.isoformat()
+        assert data["roadmap"]["target_date"] == (today + timedelta(days=1)).isoformat()
+        assert data["roadmap"]["status"] == "active"
+        mock_db.commit.assert_awaited_once()
+
+
+def test_get_roadmap_tree_endpoint_fr15_completed_roadmap_not_adjusted(
+    client: TestClient, mock_user: User, mock_db: AsyncMock
+):
+    """FR-15: Completed roadmaps must not be modified or auto-extended."""
+    roadmap_id = uuid.uuid4()
+    chapter_id = uuid.uuid4()
+    block_id = uuid.uuid4()
+
+    chapter = RoadmapNode(
+        id=chapter_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=None,
+        title="Chương 1",
+        order_index=1,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=True,
+    )
+    block = RoadmapNode(
+        id=block_id,
+        roadmap_id=roadmap_id,
+        parent_node_id=chapter_id,
+        title="Khối 1",
+        order_index=2,
+        estimated_minutes=120,
+        is_unlocked=True,
+        is_completed=True,
+    )
+
+    today = date.today()
+    past_target = today - timedelta(days=2)
+    fake_roadmap = Roadmap(
+        id=roadmap_id,
+        user_id=mock_user.id,
+        subject_id=uuid.uuid4(),
+        title="Lộ trình đã hoàn thành",
+        target_date=past_target,
+        available_hours_per_day=2.0,
+        progress_percentage=100.0,
+        status="completed",
+        created_at=datetime.now(UTC),
+        nodes=[chapter, block],
+    )
+
+    with patch("app.modules.roadmaps.router.RoadmapRepository") as mock_repo_cls:
+        mock_repo = mock_repo_cls.return_value
+        mock_repo.get_roadmap_by_id = AsyncMock(return_value=fake_roadmap)
+
+        response = client.get(f"/api/v1/roadmaps/{roadmap_id}/tree")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["was_adjusted"] is False
+        assert data["days_extended"] == 0
+        assert data["roadmap"]["target_date"] == past_target.isoformat()
+        assert data["roadmap"]["status"] == "completed"
+        mock_db.commit.assert_not_called()
 
 
 def test_get_roadmap_tree_endpoint_not_found(client: TestClient):

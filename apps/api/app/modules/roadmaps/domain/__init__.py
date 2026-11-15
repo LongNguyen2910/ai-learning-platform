@@ -3,6 +3,10 @@ from app.modules.roadmaps.domain.entities import (
     PlannedChapterNode,
     PlannedTopicNode,
 )
+from app.modules.roadmaps.domain.roadmap_pacing_adjuster import (
+    RoadmapAdjustmentResult,
+    RoadmapPacingAdjuster,
+)
 from app.modules.roadmaps.domain.study_block_pacing_calculator import (
     StudyBlockPacingCalculator,
 )
@@ -27,6 +31,8 @@ __all__ = [
     "AllocatedStudyBlock",
     "PlannedChapterNode",
     "PlannedTopicNode",
+    "RoadmapAdjustmentResult",
+    "RoadmapPacingAdjuster",
     "StudyBlockPacingCalculator",
     "StudySessionMode",
     "resolve_block_duration_bounds",

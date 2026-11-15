@@ -31,6 +31,9 @@ from app.modules.roadmaps.ai_curriculum_extractor import (
 from app.modules.roadmaps.domain.node_progression_calculator import (
     NodeProgressionCalculator,
 )
+from app.modules.roadmaps.domain.roadmap_pacing_adjuster import (
+    RoadmapPacingAdjuster,
+)
 from app.modules.roadmaps.exceptions import (
     DocumentNotParsedException,
     NodeNotFoundException,
@@ -75,6 +78,7 @@ class RoadmapService:
         calculator: StudyBlockPacingCalculator | None = None,
         builder: RoadmapTreeBuilder | None = None,
         progression_calculator: NodeProgressionCalculator | None = None,
+        pacing_adjuster: RoadmapPacingAdjuster | None = None,
     ) -> None:
         self.repo = repository
         self.extractor = extractor or AICurriculumExtractor()
@@ -83,6 +87,7 @@ class RoadmapService:
         self.progression_calculator = (
             progression_calculator or NodeProgressionCalculator()
         )
+        self.pacing_adjuster = pacing_adjuster or RoadmapPacingAdjuster()
         self._task_cache: dict[str, RoadmapTaskStatusResponse] = {}
 
     async def _resolve_subject_source_documents(
@@ -1028,20 +1033,60 @@ class RoadmapService:
             new_iteration,
         )
 
-    async def get_roadmap_tree(self, roadmap_id: uuid.UUID) -> RoadmapTreeResponse:
-        """Retrieves and transforms flat nodes into a nested 3-tier hierarchical tree."""
-        roadmap = await self.repo.get_roadmap_by_id(roadmap_id)
-        if roadmap is None:
+    async def get_roadmap_tree(
+        self,
+        roadmap_id: uuid.UUID,
+        today: date | None = None,
+        roadmap: Roadmap | None = None,
+    ) -> RoadmapTreeResponse:
+        """Retrieves and transforms flat nodes into a nested 3-tier hierarchical tree.
+
+        Applies lazy evaluation auto-adjustment if roadmap is behind schedule (FR-15).
+        """
+        target_roadmap = (
+            roadmap
+            if roadmap is not None
+            else await self.repo.get_roadmap_by_id(roadmap_id)
+        )
+        if target_roadmap is None:
             raise RoadmapNotFoundException(roadmap_id)
 
-        tree = self._build_nested_tree(roadmap.nodes)
-        total_minutes = sum(n.estimated_minutes for n in roadmap.nodes)
+        all_nodes = (
+            list(target_roadmap.nodes)
+            if getattr(target_roadmap, "nodes", None) is not None
+            else await self.repo.get_nodes_by_roadmap_id(target_roadmap.id)
+        )
+
+        adjustment = self.pacing_adjuster.adjust_if_behind(
+            roadmap=target_roadmap,
+            nodes=all_nodes,
+            today=today,
+        )
+
+        if adjustment.was_adjusted and adjustment.new_target_date is not None:
+            await self.repo.update_target_date_and_status(
+                roadmap_id=target_roadmap.id,
+                target_date=adjustment.new_target_date,
+                status=adjustment.new_status,
+                roadmap=target_roadmap,
+            )
+            target_roadmap.target_date = adjustment.new_target_date
+            target_roadmap.status = adjustment.new_status
+
+        tree = self._build_nested_tree(all_nodes)
+        total_minutes = sum(n.estimated_minutes for n in all_nodes)
 
         return RoadmapTreeResponse(
-            roadmap=RoadmapResponse.model_validate(roadmap),
+            roadmap=RoadmapResponse.model_validate(target_roadmap),
             tree=tree,
-            total_nodes=len(roadmap.nodes),
+            total_nodes=len(all_nodes),
             total_estimated_minutes=total_minutes,
+            was_adjusted=adjustment.was_adjusted,
+            was_rescheduled=adjustment.was_adjusted,
+            days_extended=adjustment.days_extended,
+            original_target_date=adjustment.original_target_date,
+            adjustment_message=adjustment.message,
+            message=adjustment.message,
         )
 
     def get_task_status(self, task_id: str) -> RoadmapTaskStatusResponse | None:

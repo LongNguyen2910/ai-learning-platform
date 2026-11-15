@@ -208,6 +208,12 @@ class RoadmapTreeResponse(BaseModel):
     tree: list[RoadmapNodeResponse]
     total_nodes: int
     total_estimated_minutes: int
+    was_adjusted: bool = False
+    was_rescheduled: bool = False
+    days_extended: int = 0
+    original_target_date: date | None = None
+    adjustment_message: str | None = None
+    message: str | None = None
 
 
 class RoadmapTaskStatusResponse(BaseModel):

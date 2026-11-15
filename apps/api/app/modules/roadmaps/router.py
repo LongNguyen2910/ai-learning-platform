@@ -157,8 +157,12 @@ async def get_roadmap_tree_structure(
         )
 
     try:
-        return await service.get_roadmap_tree(roadmap_id)
+        response = await service.get_roadmap_tree(roadmap_id, roadmap=roadmap)
+        if response.was_adjusted:
+            await db.commit()
+        return response
     except RoadmapNotFoundException as exc:
+        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=exc.message
         ) from exc

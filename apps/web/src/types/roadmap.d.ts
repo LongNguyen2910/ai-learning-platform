@@ -35,6 +35,12 @@ export interface RoadmapTreeResponse {
   tree: RoadmapNode[];
   total_nodes: number;
   total_estimated_minutes: number;
+  was_adjusted?: boolean;
+  was_rescheduled?: boolean;
+  days_extended?: number;
+  original_target_date?: string | null;
+  adjustment_message?: string | null;
+  message?: string | null;
 }
 
 export interface RoadmapGenerateRequest {

@@ -260,7 +260,7 @@ def test_endpoint_rejects_completing_archived_roadmap(auth_client: TestClient, s
 def test_schema_and_pacing_accept_15_minutes_daily():
     """He thong cho phep muc hoc toi thieu 15 phut (0.25h) moi ngay."""
     calc = StudyBlockPacingCalculator()
-    today = date(2026, 10, 28)
+    today = date.today()
     target = today + timedelta(days=10)
     minutes = calc.calculate_available_minutes(target, today, 0.25)
     assert minutes == 150  # 10 days * 15 min = 150 min
