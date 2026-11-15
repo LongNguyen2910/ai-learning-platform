@@ -44,12 +44,15 @@ class AuthService:
         if existing:
             raise EmailAlreadyExistsException()
 
+        existing_any_user = await db.scalar(select(User.id).limit(1))
+        initial_role = "admin" if existing_any_user is None else "user"
+
         hashed_password = PasswordHasher.hash(req.password)
         new_user = User(
             email=req.email,
             hashed_password=hashed_password,
             full_name=req.full_name,
-            role="user",
+            role=initial_role,
             is_active=True,
             daily_token_limit=50000,
             used_token_today=0,
@@ -238,6 +241,13 @@ class AuthService:
 
         await db.delete(user)
         await db.commit()
+
+    async def toggle_role(self, db: AsyncSession, user: User) -> User:
+        user.role = "user" if user.role == "admin" else "admin"
+        db.add(user)
+        await db.commit()
+        await db.refresh(user)
+        return user
 
 
 auth_service = AuthService()

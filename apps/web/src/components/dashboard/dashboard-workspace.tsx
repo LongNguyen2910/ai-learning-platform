@@ -13,6 +13,7 @@ import { DocumentViewer } from "@/components/dashboard/document-viewer"
 import { RoadmapWorkspace } from "@/components/dashboard/roadmap-workspace"
 import { QuizWorkspace } from "@/components/dashboard/quiz-workspace"
 import { FlashcardWorkspace } from "@/components/dashboard/flashcard-workspace"
+import { AdminUsersWorkspace } from "@/components/dashboard/admin-users-workspace"
 import {
   fetchDocuments,
   deleteDocument,
@@ -62,7 +63,8 @@ export function DashboardWorkspace() {
         saved === "documents" ||
         saved === "roadmap" ||
         saved === "quizzes" ||
-        saved === "flashcards"
+        saved === "flashcards" ||
+        saved === "admin"
       ) {
         setActiveSection(saved)
         setReturnSection(saved)
@@ -516,6 +518,13 @@ export function DashboardWorkspace() {
             }}
           />
         </main>
+
+        {/* Admin User Management Console */}
+        {hasHydratedSection && activeSection === "admin" && (
+          <main className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <AdminUsersWorkspace />
+          </main>
+        )}
 
         {/* Documents Library Workspace */}
         <main

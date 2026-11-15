@@ -13,6 +13,7 @@ import {
   Target,
   Layers,
   Flame,
+  Shield,
 } from "lucide-react"
 import { getAuthHeaders, getAuthToken } from "@/lib/api/documents"
 import {
@@ -85,11 +86,19 @@ export function TopHeader({
           headers: getAuthHeaders({ Accept: "application/json" }),
           cache: "no-store",
         })
+        if (response.status === 401 || response.status === 403) {
+          localStorage.removeItem("auth_token")
+          localStorage.removeItem("auth_user")
+          window.dispatchEvent(new Event("auth-user-updated"))
+          router.replace("/login")
+          return
+        }
         if (!response.ok) return
         const data = (await response.json()) as UserProfileResponse
         if (!cancelled && data) {
           setCurrentUser(data)
           localStorage.setItem("auth_user", JSON.stringify(data))
+          window.dispatchEvent(new Event("auth-user-updated"))
 
           const todayStr = getLocalDateString()
           if (data.last_checkin_date !== todayStr) {
@@ -203,6 +212,11 @@ export function TopHeader({
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
             <Layers className="h-4 w-4 text-[#0A77FF] shrink-0" />
             <span>Flashcards</span>
+          </div>
+        ) : activeSection === "admin" && !activeDocumentTitle ? (
+          <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white px-2 py-1 -ml-2">
+            <Shield className="h-4 w-4 text-[#0A77FF] shrink-0" />
+            <span>Admin Console</span>
           </div>
         ) : (
           <>
@@ -364,6 +378,23 @@ export function TopHeader({
                   <span>Profile</span>
                 </span>
               </button>
+
+              {currentUser?.role === "admin" && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setMenuOpen(false)
+                    router.push("/admin")
+                  }}
+                  className="w-full flex items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-[#0A77FF] dark:text-sky-300 hover:bg-[#0A77FF]/10 transition-colors cursor-pointer"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Shield className="h-4 w-4 stroke-[1.8]" />
+                    <span>Admin Console</span>
+                  </span>
+                </button>
+              )}
 
               <button
                 type="button"

@@ -11,6 +11,8 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.database import AsyncSessionLocal
+from app.modules.analytics.models import TokenUsageLog
+from app.modules.auth.models import User
 from app.modules.chat.models import ChatMessage, ChatSession
 from app.modules.documents.models import Document
 
@@ -64,6 +66,20 @@ class ChatRepository:
     async def get_session(self, session_id: uuid.UUID) -> ChatSession | None:
         async with self.session_factory() as db:
             return await db.scalar(select(ChatSession).where(ChatSession.id == session_id))
+
+    async def get_session_user_quota(self, session_id: uuid.UUID) -> tuple[int, int]:
+        """Trả về `(used_token_today, daily_token_limit)` của chủ phiên chat."""
+        async with self.session_factory() as db:
+            row = (
+                await db.execute(
+                    select(User.used_token_today, User.daily_token_limit)
+                    .join(ChatSession, ChatSession.user_id == User.id)
+                    .where(ChatSession.id == session_id)
+                )
+            ).first()
+            if row is None:
+                return 0, 0
+            return int(row[0] or 0), int(row[1] or 0)
 
     async def delete_session(self, session_id: uuid.UUID) -> bool:
         async with self.session_factory() as db:
@@ -130,6 +146,28 @@ class ChatRepository:
                 token_count=token_count,
             )
             db.add(message)
+
+            if token_count > 0:
+                session = await db.scalar(
+                    select(ChatSession).where(ChatSession.id == session_id)
+                )
+                if session is not None:
+                    user = await db.scalar(
+                        select(User).where(User.id == session.user_id)
+                    )
+                    if user is not None:
+                        user.used_token_today = int(user.used_token_today or 0) + token_count
+                        db.add(user)
+                    db.add(
+                        TokenUsageLog(
+                            user_id=session.user_id,
+                            action_type=f"chat_{sender}",
+                            input_tokens=token_count if sender == SENDER_USER else 0,
+                            output_tokens=token_count if sender != SENDER_USER else 0,
+                            total_tokens=token_count,
+                        )
+                    )
+
             await db.commit()
             await db.refresh(message)
             return message

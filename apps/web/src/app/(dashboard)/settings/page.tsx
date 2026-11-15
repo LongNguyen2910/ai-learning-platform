@@ -20,7 +20,10 @@ import {
   X,
   AlertCircle,
   HelpCircle,
+  Shield,
 } from "lucide-react"
+import { toggleMyAdminRole } from "@/lib/api/admin"
+import { fetchUserProfile } from "@/lib/api/profile"
 import {
   loadLearningPreferences,
   saveLearningPreferences,
@@ -62,10 +65,37 @@ export default function SettingsPage() {
   const [isDeletingAccount, setIsDeletingAccount] = React.useState(false)
   const [deleteErrorMsg, setDeleteErrorMsg] = React.useState<string | null>(null)
 
-  // Load preferences on client mount
+  // Developer / Admin Role Switcher State
+  const [accountRole, setAccountRole] = React.useState<string>("user")
+  const [isTogglingRole, setIsTogglingRole] = React.useState(false)
+  const [roleErrorMsg, setRoleErrorMsg] = React.useState<string | null>(null)
+
+  // Load preferences and current account role on client mount
   React.useEffect(() => {
     setLearningPrefs(loadLearningPreferences())
     setAppearancePrefs(loadAppearancePreferences())
+
+    try {
+      const rawUser = localStorage.getItem("auth_user")
+      if (rawUser) {
+        const parsed = JSON.parse(rawUser) as { role?: string }
+        if (parsed?.role) {
+          setAccountRole(parsed.role)
+        }
+      }
+    } catch {
+      // Ignore invalid JSON
+    }
+
+    fetchUserProfile()
+      .then((profile) => {
+        setAccountRole(profile.role)
+        localStorage.setItem("auth_user", JSON.stringify(profile))
+        window.dispatchEvent(new Event("auth-user-updated"))
+      })
+      .catch(() => {
+        // Keep cached role if offline
+      })
   }, [])
 
   // Update and immediately persist Learning Preferences on interaction
@@ -85,6 +115,25 @@ export default function SettingsPage() {
       setLearningSuccessMsg("Learning preferences saved successfully.")
       setTimeout(() => setLearningSuccessMsg(null), 3000)
     }, 250)
+  }
+
+  // Handle Toggle Admin Role
+  const handleToggleAdminRole = async () => {
+    if (isTogglingRole) return
+    setIsTogglingRole(true)
+    setRoleErrorMsg(null)
+    try {
+      const updated = await toggleMyAdminRole()
+      setAccountRole(updated.role)
+      localStorage.setItem("auth_user", JSON.stringify(updated))
+      window.dispatchEvent(new Event("auth-user-updated"))
+    } catch (err) {
+      setRoleErrorMsg(
+        err instanceof Error ? err.message : "Failed to switch account role."
+      )
+    } finally {
+      setIsTogglingRole(false)
+    }
   }
 
   // Handle Select Theme
@@ -440,6 +489,64 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 </form>
+
+                {/* Developer / Admin Access Switcher */}
+                <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800/80 bg-white dark:bg-slate-900 p-6 shadow-2xs space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                          Admin Access Mode
+                        </h3>
+                        <span
+                          className={`rounded-md px-2 py-0.5 text-[10px] font-mono font-semibold uppercase tracking-wide ${
+                            accountRole === "admin"
+                              ? "bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300"
+                              : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                        >
+                          Role: {accountRole}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        Toggle administrator privileges for your current account to access the Admin Console (manage users, token quotas, and account suspension/deletion).
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {accountRole === "admin" && (
+                        <Link
+                          href="/admin"
+                          className="h-9 px-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold inline-flex items-center gap-1.5 transition-colors"
+                        >
+                          <Shield className="h-3.5 w-3.5" />
+                          <span>Open Admin Console</span>
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        disabled={isTogglingRole}
+                        onClick={() => void handleToggleAdminRole()}
+                        className="h-9 px-3.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200 inline-flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+                      >
+                        {isTogglingRole && (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        )}
+                        <span>
+                          {accountRole === "admin"
+                            ? "Switch to Standard User"
+                            : "Enable Admin Mode"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {roleErrorMsg && (
+                    <div className="rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 px-3 py-2 text-xs text-rose-600 dark:text-rose-400">
+                      {roleErrorMsg}
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

@@ -8,12 +8,18 @@ import {
   Network,
   Layers,
   Target,
+  Shield,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
-export type SidebarSection = "documents" | "roadmap" | "quizzes" | "flashcards"
+export type SidebarSection =
+  | "documents"
+  | "roadmap"
+  | "quizzes"
+  | "flashcards"
+  | "admin"
 
 interface NavItem {
   id: SidebarSection
@@ -61,6 +67,32 @@ export function AppSidebar({
   onSelectSection,
   onSelectDocumentsRoot,
 }: AppSidebarProps) {
+  const [isAdmin, setIsAdmin] = React.useState(false)
+
+  React.useEffect(() => {
+    const syncRole = () => {
+      try {
+        const raw = localStorage.getItem("auth_user")
+        if (!raw) {
+          setIsAdmin(false)
+          return
+        }
+        const parsed = JSON.parse(raw) as { role?: string }
+        setIsAdmin(parsed?.role === "admin")
+      } catch {
+        setIsAdmin(false)
+      }
+    }
+
+    syncRole()
+    window.addEventListener("auth-user-updated", syncRole)
+    window.addEventListener("storage", syncRole)
+    return () => {
+      window.removeEventListener("auth-user-updated", syncRole)
+      window.removeEventListener("storage", syncRole)
+    }
+  }, [])
+
   return (
     <aside
       aria-label="Primary Sidebar Navigation"
@@ -180,6 +212,45 @@ export function AppSidebar({
             </button>
           )
         })}
+
+        {isAdmin && (
+          <div className="pt-4 mt-4 border-t border-slate-200/70 dark:border-slate-800/70 space-y-1.5">
+            {!collapsed && (
+              <div className="px-3 pb-1 text-xs font-semibold text-slate-400 dark:text-slate-500">
+                Administration
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => onSelectSection?.("admin")}
+              title={collapsed ? "Admin Console" : undefined}
+              className={cn(
+                "w-full flex items-center rounded-xl text-[15px] font-medium transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#0A77FF]",
+                collapsed
+                  ? "h-11 w-11 mx-auto justify-center"
+                  : "h-11 px-3.5 justify-between",
+                activeSection === "admin"
+                  ? "bg-[#0A77FF]/10 text-[#0A77FF] dark:bg-[#0A77FF]/20 dark:text-sky-300 font-semibold"
+                  : "text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-900 dark:hover:text-slate-100"
+              )}
+            >
+              <div className="flex items-center gap-3.5 min-w-0">
+                <Shield
+                  className={cn(
+                    "h-5 w-5 shrink-0 stroke-[1.8]",
+                    activeSection === "admin"
+                      ? "text-[#0A77FF] dark:text-sky-400"
+                      : "text-slate-500 dark:text-slate-400"
+                  )}
+                />
+                {!collapsed && <span className="truncate">Admin Console</span>}
+              </div>
+              {!collapsed && activeSection === "admin" && (
+                <span className="h-2 w-2 rounded-full bg-[#0A77FF] dark:bg-sky-400" />
+              )}
+            </button>
+          </div>
+        )}
       </nav>
 
       {/* Single Collapse / Expand Control */}
