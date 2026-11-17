@@ -288,6 +288,7 @@ class IngestionService:
         )
 
         self.mark_task_active(document_id)
+        current_stage = "phân tích nội dung"
         try:
             # Stage 1: parse content using AI & Smart Hybrid Routing
             results: list[tuple[int, str, ParsedPageMetadata]] = []
@@ -440,6 +441,7 @@ class IngestionService:
                 f.write(full_markdown)
 
             # Stage 3: Index Vector into Qdrant
+            current_stage = "tạo vector embedding"
             metadata.status = "indexing"
             metadata.pages = parsed_pages_meta
             metadata.error_message = None
@@ -447,7 +449,8 @@ class IngestionService:
             await _update_db_document_status(document_id, "indexing")
             logger.info("Starting vector indexing for document ID: %s", document_id)
 
-            self.vector_service.index_document_pages(
+            await asyncio.to_thread(
+                self.vector_service.index_document_pages,
                 document_id,
                 parsed_pages_meta,
                 user_id=user_id or metadata.user_id,
@@ -466,7 +469,7 @@ class IngestionService:
                 document_id,
             )
             metadata.status = "failed"
-            metadata.error_message = format_user_friendly_error(exc)
+            metadata.error_message = format_user_friendly_error(current_stage, exc)
             self.save_metadata(metadata)
             await _update_db_document_status(document_id, "failed", metadata.error_message)
             raise

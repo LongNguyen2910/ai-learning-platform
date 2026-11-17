@@ -320,3 +320,258 @@ def test_index_document_pages_retry_on_429(vector_service, tmp_path, monkeypatch
     assert attempts["count"] == 2
     assert len(sleep_calls) == 1
     assert sleep_calls[0] > 0
+
+
+def test_token_aware_batching_splits_by_token_budget(vector_service, tmp_path, monkeypatch):
+    """Verifies batches are also bounded by EMBEDDING_MAX_TOKENS_PER_BATCH."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 50)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_TOKENS_PER_BATCH", 120)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_TPM_LIMIT", 0)
+
+    pages_meta = []
+    for i in range(1, 5):
+        page_file = tmp_path / f"tok_page_{i}.md"
+        # ~350 chars -> ~100 estimated tokens each -> 120 token budget allows 1 per batch
+        page_file.write_text(f"Trang {i}: " + ("kiến thức học máy " * 18), encoding="utf-8")
+        pages_meta.append(
+            ParsedPageMetadata(
+                page_number=i,
+                has_formula=False,
+                has_image=False,
+                char_count=350,
+                file_path=str(page_file),
+            )
+        )
+
+    insert_calls = []
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    original_insert = VectorStoreIndex.insert_nodes
+
+    def tracking_insert(self, nodes, **kwargs):
+        insert_calls.append(len(nodes))
+        return original_insert(self, nodes, **kwargs)
+
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", tracking_insert)
+
+    total = vector_service.index_document_pages("doc_tok_budget", pages_meta)
+    assert total == 4
+    assert len(insert_calls) == 4
+    assert all(c == 1 for c in insert_calls)
+
+
+def test_sliding_window_rate_limiter_throttles_when_tpm_exceeded(monkeypatch):
+    """Verifies _SlidingWindowRateLimiter sleeps when adding tokens would exceed TPM limit."""
+    import app.modules.documents.vector_service as vs_mod
+
+    limiter = vs_mod._SlidingWindowRateLimiter(window_seconds=60.0)
+    clock = {"now": 100.0}
+    sleeps = []
+
+    def fake_monotonic():
+        return clock["now"]
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        clock["now"] += seconds
+
+    monkeypatch.setattr(vs_mod.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(vs_mod.time, "sleep", fake_sleep)
+
+    # First batch of 15k tokens under 20k TPM -> immediate
+    waited1 = limiter.acquire(tokens=15000, tpm_limit=20000, rpm_limit=80)
+    assert waited1 == 0.0
+
+    # Second batch of 10k tokens at t=101s would reach 25k > 20k -> must wait ~59.5s
+    clock["now"] = 101.0
+    waited2 = limiter.acquire(tokens=10000, tpm_limit=20000, rpm_limit=80)
+    assert waited2 >= 59.0
+    assert len(sleeps) == 1
+
+
+def test_index_document_pages_resumes_skipping_existing_chunks(vector_service, tmp_path, monkeypatch):
+    """Verifies partial progress is preserved on 429 failure and resumed without re-embedding done chunks."""
+    from app.core.config import settings
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 2)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_TOKENS_PER_BATCH", 8000)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_RETRIES", 1)
+    monkeypatch.setattr(settings, "EMBEDDING_TPM_LIMIT", 0)
+
+    pages_meta = []
+    for i in range(1, 5):
+        page_file = tmp_path / f"resume_page_{i}.md"
+        page_file.write_text(f"Nội dung trang {i} cho kiểm thử resume.", encoding="utf-8")
+        pages_meta.append(
+            ParsedPageMetadata(
+                page_number=i,
+                has_formula=False,
+                has_image=False,
+                char_count=40,
+                file_path=str(page_file),
+            )
+        )
+
+    original_insert = VectorStoreIndex.insert_nodes
+    state = {"calls": [], "fail_second": True}
+
+    def flaky_insert(self, nodes, **kwargs):
+        state["calls"].append(len(nodes))
+        if state["fail_second"] and len(state["calls"]) == 2:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED")
+        return original_insert(self, nodes, **kwargs)
+
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", flaky_insert)
+
+    # First run: batch 1 (2 nodes) succeeds, batch 2 (2 nodes) fails
+    with pytest.raises(RuntimeError, match="429"):
+        vector_service.index_document_pages("doc_resume_idx", pages_meta)
+
+    assert state["calls"] == [2, 2]
+
+    # Second run: batch 1 is already in Qdrant, only remaining 2 nodes are indexed
+    state["calls"].clear()
+    state["fail_second"] = False
+    total = vector_service.index_document_pages("doc_resume_idx", pages_meta)
+    assert total == 4
+    assert state["calls"] == [2]
+
+
+def test_index_document_pages_fails_fast_on_hard_daily_quota(vector_service, tmp_path, monkeypatch):
+    """Verifies daily/billing quota exhaustion does not sleep or retry."""
+    from app.core.config import settings
+    import app.modules.documents.vector_service as vs_mod
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 5)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_RETRIES", 5)
+    monkeypatch.setattr(settings, "EMBEDDING_TPM_LIMIT", 0)
+
+    page_file = tmp_path / "daily_quota.md"
+    page_file.write_text("Nội dung test hard daily quota.", encoding="utf-8")
+    pages_meta = [
+        ParsedPageMetadata(
+            page_number=1,
+            has_formula=False,
+            has_image=False,
+            char_count=30,
+            file_path=str(page_file),
+        )
+    ]
+
+    attempts = {"count": 0}
+    sleep_calls = []
+
+    def daily_fail_insert(self, nodes, **kwargs):
+        attempts["count"] += 1
+        raise RuntimeError("429 Quota exceeded for metric embed_content per day. Check your plan and billing.")
+
+    monkeypatch.setattr(vs_mod.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", daily_fail_insert)
+
+    with pytest.raises(RuntimeError, match="per day"):
+        vector_service.index_document_pages("doc_daily_fail", pages_meta)
+
+    assert attempts["count"] == 1
+    assert sleep_calls == []
+
+
+def test_index_document_pages_respects_retry_after_delay(vector_service, tmp_path, monkeypatch):
+    """Verifies retry delay parsed from Google API error message is respected."""
+    from app.core.config import settings
+    import app.modules.documents.vector_service as vs_mod
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 5)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_RETRIES", 3)
+    monkeypatch.setattr(settings, "EMBEDDING_TPM_LIMIT", 0)
+
+    page_file = tmp_path / "retry_after.md"
+    page_file.write_text("Nội dung test retryDelay parsing.", encoding="utf-8")
+    pages_meta = [
+        ParsedPageMetadata(
+            page_number=1,
+            has_formula=False,
+            has_image=False,
+            char_count=30,
+            file_path=str(page_file),
+        )
+    ]
+
+    original_insert = VectorStoreIndex.insert_nodes
+    attempts = {"count": 0}
+    sleep_calls = []
+
+    def flaky_insert(self, nodes, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("429 RESOURCE_EXHAUSTED. Please retry in 42.5s.")
+        return original_insert(self, nodes, **kwargs)
+
+    monkeypatch.setattr(vs_mod.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", flaky_insert)
+
+    total = vector_service.index_document_pages("doc_retry_after", pages_meta)
+    assert total == 1
+    assert attempts["count"] == 2
+    assert len(sleep_calls) == 1
+    assert sleep_calls[0] >= 43.5
+
+
+def test_index_document_pages_retries_google_tpm_error_with_billing_boilerplate(
+    vector_service, tmp_path, monkeypatch
+):
+    """Verifies Google's per-minute 429 message containing 'plan and billing details' is retried, not treated as hard daily quota."""
+    from app.core.config import settings
+    import app.modules.documents.vector_service as vs_mod
+    from llama_index.core.indices.vector_store import VectorStoreIndex
+
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_SIZE", 5)
+    monkeypatch.setattr(settings, "EMBEDDING_BATCH_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(settings, "EMBEDDING_MAX_RETRIES", 3)
+    monkeypatch.setattr(settings, "EMBEDDING_TPM_LIMIT", 0)
+
+    page_file = tmp_path / "tpm_boilerplate.md"
+    page_file.write_text("Nội dung test lỗi TPM của Google.", encoding="utf-8")
+    pages_meta = [
+        ParsedPageMetadata(
+            page_number=1,
+            has_formula=False,
+            has_image=False,
+            char_count=35,
+            file_path=str(page_file),
+        )
+    ]
+
+    original_insert = VectorStoreIndex.insert_nodes
+    attempts = {"count": 0}
+    sleep_calls = []
+
+    google_tpm_msg = (
+        "429 RESOURCE_EXHAUSTED. {'error': {'code': 429, 'message': "
+        "'You exceeded your current quota, please check your plan and billing details. "
+        "Embed content tokens per minute limit exceeded on Free Tier. "
+        "Please retry in 33.714717229s.'}}"
+    )
+
+    def flaky_insert(self, nodes, **kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError(google_tpm_msg)
+        return original_insert(self, nodes, **kwargs)
+
+    monkeypatch.setattr(vs_mod.time, "sleep", lambda s: sleep_calls.append(s))
+    monkeypatch.setattr(VectorStoreIndex, "insert_nodes", flaky_insert)
+
+    total = vector_service.index_document_pages("doc_tpm_boilerplate", pages_meta)
+    assert total == 1
+    assert attempts["count"] == 2
+    assert len(sleep_calls) == 1
+    assert sleep_calls[0] >= 34.7

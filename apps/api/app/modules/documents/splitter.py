@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 import uuid
@@ -239,6 +240,7 @@ class MarkdownStructureSplitter:
 
             body = "\n\n".join(b.text for b in blist)
             full_text = f"{prefix}\n\n{body}"
+            content_hash = hashlib.sha256(full_text.encode("utf-8")).hexdigest()[:16]
 
             # Detect math formulas and image presence
             has_formula = bool(re.search(r"(?<!\\)\$.+?(?<!\\)\$", body, re.DOTALL))
@@ -251,6 +253,7 @@ class MarkdownStructureSplitter:
                 "section_heading": breadcrumb or doc_title or f"Trang {page_number}",
                 "has_formula": has_formula,
                 "has_image": has_image,
+                "content_hash": content_hash,
             }
             if user_id:
                 metadata["user_id"] = str(user_id)
