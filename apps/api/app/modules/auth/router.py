@@ -199,6 +199,20 @@ async def change_password(
         ) from exc
 
 
+@router.post(
+    "/me/toggle-role",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Toggle current user's role between user and admin (for local/dev testing)",
+)
+async def toggle_my_role(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> UserResponse:
+    updated = await auth_service.toggle_role(db, current_user)
+    return UserResponse.model_validate(updated)
+
+
 @router.delete(
     "/account",
     response_model=MessageResponse,

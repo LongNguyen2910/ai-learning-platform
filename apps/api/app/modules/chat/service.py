@@ -481,6 +481,21 @@ class SocraticChatService:
     async def stream_reply(
         self, session: ChatSession, request: ChatRequest
     ) -> AsyncIterator[str]:
+        get_quota = getattr(self.repository, "get_session_user_quota", None)
+        if callable(get_quota):
+            used_today, daily_limit = await get_quota(session.id)
+            if daily_limit > 0 and used_today >= daily_limit:
+                yield _sse(
+                    "error",
+                    {
+                        "message": (
+                            f"Bạn đã sử dụng hết hạn mức {daily_limit:,} token trong ngày hôm nay. "
+                            "Vui lòng quay lại vào ngày mai hoặc liên hệ Admin để nâng hạn mức."
+                        )
+                    },
+                )
+                return
+
         guard = analyze_query(request.content)
         history = await self.repository.list_recent_messages(
             session.id, limit=HISTORY_LIMIT

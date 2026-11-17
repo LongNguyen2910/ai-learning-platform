@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import app.core.models_registry
 from app.core.config import settings
 from app.core.database import ensure_roadmap_exam_schema
+from app.modules.admin import admin_router
 from app.modules.auth import auth_router
 from app.modules.chat import chat_router
 from app.modules.documents import documents_router, ingestion_service, subjects_router
@@ -60,6 +61,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(admin_router, prefix="/api/v1")
 app.include_router(subjects_router, prefix="/api/v1")
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(chat_router, prefix="/api/v1")

@@ -71,28 +71,37 @@ async def ensure_roadmap_exam_schema() -> None:
         ("quiz_questions", "source_document_id"),
         ("quiz_questions", "source_document_title"),
     }
-    if required.issubset(existing) and deck_subject_nullable:
-        return
+    if not (required.issubset(existing) and deck_subject_nullable):
+        ddl_statements = [
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_streak INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS total_checkin_days INTEGER NOT NULL DEFAULT 0;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_checkin_date DATE NULL;",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_milestone INTEGER NULL;",
+            "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS exam_status VARCHAR(20) NOT NULL DEFAULT 'locked';",
+            "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS latest_exam_score DOUBLE PRECISION NULL;",
+            "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS iteration INTEGER NOT NULL DEFAULT 1;",
+            "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS parent_roadmap_id UUID NULL REFERENCES roadmaps(id) ON DELETE SET NULL;",
+            "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS weak_topics JSONB NOT NULL DEFAULT '[]'::jsonb;",
+            "ALTER TABLE quizzes ALTER COLUMN document_id DROP NOT NULL;",
+            "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS roadmap_id UUID NULL REFERENCES roadmaps(id) ON DELETE CASCADE;",
+            "CREATE INDEX IF NOT EXISTS ix_quizzes_roadmap_id ON quizzes (roadmap_id);",
+            "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_id UUID NULL;",
+            "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_title VARCHAR(255) NULL;",
+            "ALTER TABLE flashcard_decks ALTER COLUMN subject_id DROP NOT NULL;",
+        ]
+        async with engine.begin() as conn:
+            for stmt in ddl_statements:
+                await conn.execute(text(stmt))
 
-    ddl_statements = [
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT NULL;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS current_streak INTEGER NOT NULL DEFAULT 0;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS longest_streak INTEGER NOT NULL DEFAULT 0;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS total_checkin_days INTEGER NOT NULL DEFAULT 0;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_checkin_date DATE NULL;",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS equipped_milestone INTEGER NULL;",
-        "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS exam_status VARCHAR(20) NOT NULL DEFAULT 'locked';",
-        "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS latest_exam_score DOUBLE PRECISION NULL;",
-        "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS iteration INTEGER NOT NULL DEFAULT 1;",
-        "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS parent_roadmap_id UUID NULL REFERENCES roadmaps(id) ON DELETE SET NULL;",
-        "ALTER TABLE roadmaps ADD COLUMN IF NOT EXISTS weak_topics JSONB NOT NULL DEFAULT '[]'::jsonb;",
-        "ALTER TABLE quizzes ALTER COLUMN document_id DROP NOT NULL;",
-        "ALTER TABLE quizzes ADD COLUMN IF NOT EXISTS roadmap_id UUID NULL REFERENCES roadmaps(id) ON DELETE CASCADE;",
-        "CREATE INDEX IF NOT EXISTS ix_quizzes_roadmap_id ON quizzes (roadmap_id);",
-        "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_id UUID NULL;",
-        "ALTER TABLE quiz_questions ADD COLUMN IF NOT EXISTS source_document_title VARCHAR(255) NULL;",
-        "ALTER TABLE flashcard_decks ALTER COLUMN subject_id DROP NOT NULL;",
-    ]
+    # Idempotently promote the earliest user to admin if no admin account exists yet
     async with engine.begin() as conn:
-        for stmt in ddl_statements:
-            await conn.execute(text(stmt))
+        await conn.execute(
+            text(
+                "UPDATE users "
+                "SET role = 'admin' "
+                "WHERE id = (SELECT id FROM users ORDER BY created_at ASC LIMIT 1) "
+                "AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin');"
+            )
+        )
