@@ -7,6 +7,7 @@ import {
   Loader2,
   AlertCircle,
   CheckCircle2,
+  X,
 } from "lucide-react"
 import {
   uploadDocument,
@@ -28,6 +29,26 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
   const [successMessage, setSuccessMessage] = React.useState<string | null>(
     null
   )
+
+  React.useEffect(() => {
+    if (!errorMessage) return
+
+    const timer = setTimeout(() => {
+      setErrorMessage(null)
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [errorMessage])
+
+  React.useEffect(() => {
+    if (!successMessage) return
+
+    const timer = setTimeout(() => {
+      setSuccessMessage(null)
+    }, 5000)
+
+    return () => clearTimeout(timer)
+  }, [successMessage])
 
   const processFile = async (file: File) => {
     setErrorMessage(null)
@@ -55,9 +76,6 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
         })`
       )
       onUploaded(response, file)
-      setTimeout(() => {
-        setSuccessMessage(null)
-      }, 4000)
     } catch (err) {
       setErrorMessage(
         err instanceof Error
@@ -187,20 +205,40 @@ export function DocumentUploadZone({ onUploaded }: DocumentUploadZoneProps) {
       {errorMessage && (
         <div
           role="alert"
-          className="flex items-center gap-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-900/60 px-4 py-2.5 text-xs font-medium text-rose-600 dark:text-rose-400"
+          className="flex items-center justify-between gap-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200/80 dark:border-rose-900/60 px-4 py-2.5 text-xs font-medium text-rose-600 dark:text-rose-400"
         >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{errorMessage}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="break-words">{errorMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setErrorMessage(null)}
+            className="shrink-0 p-0.5 rounded-md hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-200 transition-colors cursor-pointer"
+            aria-label="Đóng thông báo"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
 
       {successMessage && (
         <div
           role="status"
-          className="flex items-center gap-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-900/60 px-4 py-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
+          className="flex items-center justify-between gap-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/80 dark:border-emerald-900/60 px-4 py-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-400"
         >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{successMessage}</span>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <CheckCircle2 className="h-4 w-4 shrink-0" />
+            <span className="break-words">{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage(null)}
+            className="shrink-0 p-0.5 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-600 hover:text-emerald-800 dark:text-emerald-400 dark:hover:text-emerald-200 transition-colors cursor-pointer"
+            aria-label="Đóng thông báo"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </div>

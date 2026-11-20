@@ -354,3 +354,40 @@ def test_count_parsed_pages_live_progress(temp_dirs):
     (pages_dir / "page_4.md").write_text("", encoding="utf-8")
 
     assert service.count_parsed_pages(doc_id) == 3
+
+
+def test_upload_duplicate_document_rejected(client, temp_dirs):
+    minimal_pdf = (
+        b"%PDF-1.4\n"
+        b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+        b"2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n"
+        b"3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\n"
+        b"xref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000052 00000 n\n0000000101 00000 n\n"
+        b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n178\n%%EOF\n"
+    )
+
+    with patch("app.modules.documents.service.IngestionService.run_ingestion_pipeline"):
+        # 1. First upload -> 202
+        res1 = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("math101.pdf", minimal_pdf, "application/pdf")},
+            data={"title": "Math 101"},
+        )
+        assert res1.status_code == 202
+
+        # 2. Second upload (duplicate content) -> 409 Conflict
+        res2 = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("math101_copy.pdf", minimal_pdf, "application/pdf")},
+            data={"title": "Math 101 Copy"},
+        )
+        assert res2.status_code == 409
+        assert "đã tồn tại" in res2.json()["detail"]
+
+        # 3. Third upload with allow_duplicate=true -> 202
+        res3 = client.post(
+            "/api/v1/documents/upload",
+            files={"file": ("math101_forced.pdf", minimal_pdf, "application/pdf")},
+            data={"title": "Math 101 Forced", "allow_duplicate": "true"},
+        )
+        assert res3.status_code == 202

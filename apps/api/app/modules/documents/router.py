@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import shutil
 import uuid
@@ -40,6 +41,14 @@ from app.modules.documents.service import ingestion_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+
+def _compute_sha256(path: Path) -> str:
+    hasher = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(65536):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 @router.get(
@@ -120,6 +129,7 @@ async def upload_document(
     file: UploadFile = File(..., description="PDF document file"),
     title: str | None = Form(None, description="Optional document display title"),
     subject_id: str | None = Form(None, description="Optional Subject UUID"),
+    allow_duplicate: bool = Form(False, description="Allow uploading duplicate document"),
     current_user: Annotated[User, Depends(get_current_active_user)] = None,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ):
@@ -169,12 +179,68 @@ async def upload_document(
             detail=f"Invalid or corrupted PDF file: {exc}",
         )
 
+    file_hash = _compute_sha256(destination)
+
     parsed_subject_uuid: uuid.UUID | None = None
     if subject_id and subject_id.strip():
         try:
             parsed_subject_uuid = uuid.UUID(subject_id.strip())
         except ValueError:
             parsed_subject_uuid = None
+
+    # Check for duplicate document
+    if current_user is not None and not allow_duplicate:
+        duplicate_title: str | None = None
+
+        # 1. Check in Database if available
+        if db is not None:
+            try:
+                dup_stmt = select(Document).where(
+                    Document.user_id == current_user.id,
+                    Document.status != "failed",
+                )
+                if parsed_subject_uuid is not None:
+                    dup_stmt = dup_stmt.where(Document.subject_id == parsed_subject_uuid)
+                existing_docs = (await db.scalars(dup_stmt)).all()
+
+                for d in existing_docs:
+                    meta = ingestion_service.load_metadata(str(d.id))
+                    existing_hash = getattr(meta, "file_hash", None) if meta else None
+                    if not existing_hash and d.file_path and Path(d.file_path).is_file():
+                        try:
+                            existing_hash = _compute_sha256(Path(d.file_path))
+                            if meta:
+                                meta.file_hash = existing_hash
+                                ingestion_service.save_metadata(meta)
+                        except Exception:
+                            pass
+                    if existing_hash and existing_hash == file_hash:
+                        duplicate_title = d.title
+                        break
+            except Exception as db_exc:
+                logger.debug("Database duplicate check skipped/failed: %s", db_exc)
+
+        # 2. Check in filesystem metadata
+        if not duplicate_title:
+            for doc_item in ingestion_service.list_documents(user_id=str(current_user.id)):
+                if (
+                    parsed_subject_uuid
+                    and doc_item.subject_id
+                    and doc_item.subject_id != str(parsed_subject_uuid)
+                ):
+                    continue
+                meta = ingestion_service.load_metadata(doc_item.document_id)
+                if meta and getattr(meta, "file_hash", None) == file_hash:
+                    duplicate_title = doc_item.title
+                    break
+
+        if duplicate_title:
+            destination.unlink(missing_ok=True)
+            scope_desc = "môn học" if parsed_subject_uuid else "hệ thống"
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Tài liệu này đã tồn tại trong {scope_desc} (Trùng với '{duplicate_title}').",
+            )
 
     # Save to PostgreSQL Document table if DB and current_user are present
     if db is not None and current_user is not None:
@@ -202,6 +268,7 @@ async def upload_document(
         subject_id=str(parsed_subject_uuid) if parsed_subject_uuid else None,
         title=doc_title,
         file_path=str(destination),
+        file_hash=file_hash,
         file_size_kb=max(1, int(file_size_bytes / 1024)),
         total_pages=total_pages,
         status="uploading",

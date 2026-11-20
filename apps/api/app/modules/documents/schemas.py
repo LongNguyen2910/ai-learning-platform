@@ -22,6 +22,7 @@ class DocumentMetadata(BaseModel):
     subject_id: str | None = None
     title: str
     file_path: str
+    file_hash: str | None = None
     file_size_kb: int
     total_pages: int
     status: DocumentStatus = "uploading"
